@@ -1,0 +1,35 @@
+import torch
+import torch.nn as nn
+
+class ResidualBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(channels),
+            nn.PReLU(),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(channels)
+        )
+    def forward(self, x): return x + self.block(x)
+
+class SRGANGenerator(nn.Module):
+    def __init__(self, in_channels, out_channels=1, num_res_blocks=8):
+        super().__init__()
+        self.conv1 = nn.Sequential(nn.Conv2d(in_channels, 64, kernel_size=3, padding=1), nn.PReLU())
+        self.res_blocks = nn.Sequential(*[ResidualBlock(64) for _ in range(num_res_blocks)])
+        
+        # Progressive sub-pixel upscaling pipeline transformations: 9x9 -> 36x36 -> 144x144
+        self.upscale = nn.Sequential(
+            nn.Conv2d(64, 1024, kernel_size=3, padding=1), nn.PixelShuffle(4), nn.PReLU(),
+            nn.Conv2d(64, 1024, kernel_size=3, padding=1), nn.PixelShuffle(4), nn.PReLU()
+        )
+        # Symmetrical center boundary alignment compression map to exactly 128x128 
+        self.final_crop = nn.Conv2d(64, out_channels, kernel_size=17, stride=1, padding=0)
+        self.activation = nn.ReLU() # Assures preservation of non-negative physics bounds
+        
+    def forward(self, dynamic_in, static_in=None):
+        x = self.conv1(dynamic_in)
+        x = self.res_blocks(x) + x
+        x = self.upscale(x)
+        return self.activation(self.final_crop(x))

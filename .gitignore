@@ -1,0 +1,56 @@
+# --- Data (never commit these -- GRIB files are 200-430MB each) ---
+data/
+*.grib
+*.grib2
+*.nc
+*.netcdf
+*.grib.*.idx
+*.idx
+
+# --- Credentials / secrets ---
+kaggle.json
+.env
+*.env
+secrets.yaml
+*_token.json
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# --- Environments ---
+.venv/
+venv/
+env/
+
+# --- uv ---
+.uv/
+
+# --- Model checkpoints / outputs / experiment tracking ---
+checkpoints/
+outputs/
+results/
+figures/
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.safetensors
+runs/
+wandb/
+lightning_logs/
+mlruns/
+tensorboard/
+
+# --- OS / editor cruft ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# --- Jupyter / Kaggle ---
+.ipynb_checkpoints/
+
