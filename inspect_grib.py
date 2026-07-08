@@ -25,13 +25,13 @@ def inspect(path):
     # level types or step types mixed together). cfgrib needs each one
     # opened separately if they don't share a common grid/dims.
     try:
-        ds = xr.open_dataset(path, engine="cfgrib")
+        ds = xr.open_dataset(path, engine="cfgrib", backend_kwargs={"indexpath": ""})
         _describe(ds)
     except Exception as e:
         print(f"Single open_dataset failed ({e}).")
         print("Trying open_datasets (cfgrib.open_datasets) to split by hypercube...\n")
         import cfgrib
-        datasets = cfgrib.open_datasets(path)
+        datasets = cfgrib.open_datasets(path, backend_kwargs={"indexpath": ""})
         for i, ds in enumerate(datasets):
             print(f"--- Hypercube {i} ---")
             _describe(ds)
