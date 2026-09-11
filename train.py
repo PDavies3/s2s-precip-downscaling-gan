@@ -21,7 +21,8 @@ def get_config_dataloader(config_path, batch_size, region_override=None, shuffle
         config["region"] = region_override
     dataset = ConfigurableDownscalingDataset(config)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle,
-                         num_workers=min(2, os.cpu_count() or 1))
+                         num_workers=min(2, os.cpu_count() or 1),
+                         pin_memory=torch.cuda.is_available())
     return config, dataset, loader
 
 
@@ -87,9 +88,9 @@ def validate(netG, val_loader, device):
     total_pixel = 0.0
     n_batches = 0
     for batch in val_loader:
-        dynamics = batch["dynamic_input"].to(device)
-        statics = batch["static_input"].to(device)
-        real_rain = batch["target"].to(device)
+        dynamics = batch["dynamic_input"].to(device, non_blocking=True)
+        statics = batch["static_input"].to(device, non_blocking=True)
+        real_rain = batch["target"].to(device, non_blocking=True)
         fake_rain = netG(dynamics, statics)
         total_pixel += CRITERION_PIXEL(fake_rain, real_rain).item()
         n_batches += 1
@@ -183,9 +184,9 @@ def train(args):
         n_batches = 0
 
         for batch in train_loader:
-            dynamics = batch["dynamic_input"].to(device)
-            statics = batch["static_input"].to(device)
-            real_rain = batch["target"].to(device)
+            dynamics = batch["dynamic_input"].to(device, non_blocking=True)
+            statics = batch["static_input"].to(device, non_blocking=True)
+            real_rain = batch["target"].to(device, non_blocking=True)
 
             if use_adversarial:
                 loss_D = discriminator_step(netD, netG, optimizer_D, args.variant, dynamics, statics, real_rain)
