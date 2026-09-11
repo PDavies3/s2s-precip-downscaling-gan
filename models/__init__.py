@@ -3,12 +3,12 @@ from models.variant2_pix2pix import Pix2PixGenerator
 from models.variant3_unet import HybridGenerator
 from models.variant4_stfagan import STFAGenerator
 from models.discriminator import Pix2PixDiscriminator
-from config import SURFACE_VARIABLES, ATMOSPHERIC_VARIABLES, STATIC_GEOGRAPHIC_VARIABLES
 
-def get_models(variant_id, device):
-    # Calculate channel footprints dynamically based on user selections
-    num_dynamic_channels = len(SURFACE_VARIABLES) + len(ATMOSPHERIC_VARIABLES)
-    num_static_channels = len(STATIC_GEOGRAPHIC_VARIABLES)
+def get_models(variant_id, num_dynamic_channels, num_static_channels, device):
+    # Channel counts come from the caller (a probe batch off the configured
+    # dataloader) rather than a shared config module -- adding a predictor
+    # variable to a YAML config changes these automatically, no code here
+    # needs to change.
 
     if variant_id == 1:
         netG = SRGANGenerator(in_channels=num_dynamic_channels)

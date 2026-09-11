@@ -1,0 +1,12 @@
+# Same variables/patch settings as ghana_template.yaml, but wide enough to
+# actually benefit from patch tiling at ERA5's real coarse_resolution_deg=2.5
+# (one patch = 9 * 2.5 = 22.5 deg per side). africa (73 x 72 deg -- see
+# utils/regions.py) tiles into 3 x 3 = 9 patches per date/lead/member, so the
+# model trains across 9 physically distinct geographies -- coastal, arid,
+# highland, etc. -- each still at real 2.5 deg/pixel detail, instead of
+# memorizing one fixed box the way ghana_template.yaml/west_africa_template.yaml
+# currently do (both collapse to a single 1 x 1 patch at this resolution).
+# Use this when the goal is a model that generalizes across West/wider Africa
+# rather than one specialized to a single domain.
+extends: ghana_template.yaml
+region: africa

@@ -1,0 +1,4 @@
+extends: africa_template.yaml
+data_root: !env ${DOWNSCALING_DATA_ROOT}
+start_date: '2015-01-01'
+end_date: '2021-12-31'

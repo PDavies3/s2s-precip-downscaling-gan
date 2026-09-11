@@ -1,0 +1,121 @@
+# ==============================================================================
+# ghana_template.yaml -- base variable/region declarations for the ERA5 (2.5
+# deg) -> IMERG (0.1 deg) downscaling pipeline. `ghana_train.yaml` /
+# `ghana_val.yaml` `extends` this file and only override
+# data_root/start_date/end_date, so the two can never drift apart on which
+# variables are trained on.
+#
+# Expected data layout (one folder per variable, under data_root):
+#   <data_root>/<path>/[number_<member>/][level_<N>/]<name>_<date>[-<HHMM>].nc
+# e.g. data_root/t2m/t2m_2025-05-01-0000.nc
+#      data_root/u/level_700/u_2025-05-01-0000.nc      (pressure-level var)
+#      data_root/u/level_700/number_3/u_2025-05-01-0000.nc  (ensemble member)
+# Every ensemble member is indexed as a SEPARATE sample (not averaged).
+#
+# IMPORTANT -- all four generators need the static/target grid to resolve to
+# exactly 128x128, and variants 1/3/4 (SRGANGenerator, HybridGenerator,
+# STFAGenerator) additionally need the dynamic input to resolve to exactly
+# 9x9 (their PixelShuffle(4) x2 + kernel_size=17 valid-conv crop is hard-coded
+# for 9 -> 36 -> 144 -> crop 17 -> 128). The `patch` block below is how that's
+# satisfied WITHOUT squashing a whole region into one shape-distorted sample:
+#
+#   coarse_resolution_deg = 2.5 (ERA5's native grid spacing) fixes the
+#   PHYSICAL size of one coarse pixel. coarse_shape/fine_shape are the pixel
+#   counts the model needs. One "patch" therefore covers
+#   coarse_shape[0] * coarse_resolution_deg = 9 * 2.5 = 22.5 deg on a side --
+#   the region is tiled into as many non-overlapping patches of that physical
+#   size as fit, so a BIGGER region (e.g. region: west_africa, see
+#   configs/west_africa_template.yaml) yields MORE training samples at the
+#   same real resolution, rather than the same one sample stretched thinner.
+#   A region smaller than one patch (e.g. ghana alone, 7x5 deg, vs. a
+#   22.5x22.5 deg patch) still yields exactly one patch, whose bounds extend
+#   a bit past the named region -- that's the model's fixed receptive field,
+#   not a bug; see utils/folder_dataset.py's module docstring.
+#
+#   The fine side is bound by the SAME 22.5 deg patch footprint, resampled to
+#   exactly 128 pixels (fixed by the model) -> 22.5/127 = 0.177 deg/pixel.
+#   IMERG's native resolution is 0.1 deg (finer than that), so this is a
+#   downsample of the true label detail to fit the model's fixed output size,
+#   not fabricated resolution -- expected, not an error.
+# ==============================================================================
+
+region: ghana
+
+patch:
+  coarse_shape: [9, 9]
+  fine_shape: [128, 128]
+  coarse_resolution_deg: 2.5  # ERA5 native grid spacing
+
+inputs:
+  # -- single-level surface variables --
+  - name: t2m
+    path: t2m
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+  - name: d2m
+    path: d2m
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+  - name: cape
+    path: cape
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+  - name: tciw
+    path: tciw
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: confirm shortName (tciw/tcw/tcwv?) + real stats
+  - name: msl
+    path: msl
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+  - name: u10
+    path: u10
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+  - name: v10
+    path: v10
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+  - name: mx2t
+    path: mx2t
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+
+  # -- pressure-level variables: one channel per entry in `levels` --
+  - name: u
+    path: u
+    levels: [700, 500]
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+  - name: w
+    path: w
+    levels: [700, 500]
+    normalisation:
+      type: zscore
+      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+
+target:
+  name: precipitation
+  path: imerg
+  normalisation:
+    type: log1p
+    stats: {log1p_mean: 0.0, log1p_std: 1.0}  # TODO: replace with real stats once data exists
+
+# Static high-resolution context. Two SEPARATE single-variable files --
+# a shared multi-variable file would silently collide (the loader takes
+# the file's first data variable, whichever name asks for it).
+additional_data:
+  - landmask
+  - topography
+additional_data_paths:
+  landmask: static/landmask.nc
+  topography: static/topography.nc

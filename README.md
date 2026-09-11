@@ -12,55 +12,76 @@ with surface and atmospheric input variables declared in one config file — no
 model code changes needed to add new predictors. Built for West African
 rainfall applications (Ghana domain).
 
-Verified working on CPU: `pytest tests/ -v` → 13 passed.
+Verified working on CPU: `pytest tests/ -v` → 23 passed.
 
 **Topics:** `gan` `precipitation-downscaling` `climate-deep-learning` `pytorch`
 `s2s-forecasting` `west-africa` `imerg` `super-resolution`
 
 ## Structure
 ```
-config.py              # variable + shape declarations (NetCDF mock/prototype)
-config_grib.py         # variable + path declarations (real ECMWF S2S GRIB2 data)
-train.py                # CLI entrypoint: --variant {1,2,3,4}
+configs/                # YAML configs: variables, region, normalisation, dates (extends-based)
+train.py                # CLI entrypoint: --config/--val_config, --variant {1,2,3,4}, --dry_run
 models/                 # generators, discriminator, factory router
-utils/dataset.py        # unified NetCDF dataloader (prototype)
-utils/grib_dataset.py   # unified GRIB dataloader (production, real data)
+utils/config_loader.py  # YAML loader (`extends` inheritance, `!env` tags)
+utils/regions.py        # named region presets (africa / west_africa / ghana)
+utils/normalisation.py  # per-variable zscore/log1p transforms
+utils/additional_features.py  # computed static context channels (latlon, day_of_year)
+utils/folder_dataset.py # unified per-variable-folder NetCDF dataloader (production, real data)
 tests/                  # dataset, architecture (fwd pass), gradient (backward pass) checks
 .github/workflows/      # CI: runs the test suite on every push/PR
-inspect_grib.py          # standalone script to inspect a GRIB file's variables/dims
 ```
 
 ## Configuration
 
-All user-facing settings live in two config files — no need to touch model
-or dataloader code to change what you train on.
+All user-facing settings live in YAML configs under `configs/` — no need to
+touch model or dataloader code to change what you train on.
 
-### `config.py` — mock/NetCDF prototype settings
-Used by the original NetCDF-based test/demo pipeline (`utils/dataset.py`).
-```python
-SURFACE_VARIABLES = ["t2m", "u10", "v10", "msl"]
-ATMOSPHERIC_VARIABLES = ["q", "r", "t", "u"]
-STATIC_GEOGRAPHIC_VARIABLES = ["landmask", "topography"]
-COARSE_SHAPE = (9, 9)      # input grid resolution
-FINE_SHAPE = (128, 128)    # target grid resolution
-```
-
-### `config_grib.py` — real ECMWF S2S GRIB2 data settings
-Used by the production dataloader (`utils/grib_dataset.py`).
+### `configs/ghana_template.yaml` — variable + region declarations
+The shared base that `configs/ghana_train.yaml` and `configs/ghana_val.yaml`
+`extends:`, so training and validation can never drift apart on which
+variables are used.
 
 | Setting | Purpose |
 |---|---|
-| `DATA_ROOT` | Resolved dynamically — set via `DOWNSCALING_DATA_ROOT` env var, or overridden per-call (e.g. `--data_dir`) |
-| `FILENAME_TEMPLATES` | Maps each GRIB file group to its filename pattern (`{date}` placeholder) |
-| `SURFACE_VARIABLES` | `{variable_name: file_group}` — single-level variables |
-| `ATMOSPHERIC_VARIABLES` | `{variable_name: file_group}` — multi-level variables, auto-expanded across `PRESSURE_LEVELS` |
-| `PRESSURE_LEVELS` | e.g. `[700, 500]` hPa |
-| `STATIC_LAYERS_PATH` / `IMERG_FILENAME_TEMPLATE` | Paths to static context and target precipitation files |
+| `region` | Named preset (`africa` / `west_africa` / `ghana`) or explicit `{lat_min, lat_max, lon_min, lon_max}` |
+| `patch` | `{coarse_shape, fine_shape, coarse_resolution_deg}` — see below |
+| `inputs` | List of `{name, path, normalisation, [levels], [scale]}` — single-level or pressure-level (via `levels`) dynamic predictors |
+| `target` | The IMERG precipitation variable + its normalisation |
+| `additional_data` / `additional_data_paths` | Static high-resolution context (e.g. `landmask`, `topography`), computed (`latlon`, `day_of_year`) or file-based |
 
-**To add a new predictor variable:** add one line to `SURFACE_VARIABLES` or
-`ATMOSPHERIC_VARIABLES` in `config_grib.py`. Channel counts propagate
-automatically into the model factory (`models/__init__.py`) — no other file
-needs to change.
+### `configs/ghana_train.yaml` / `configs/ghana_val.yaml` / `configs/west_africa_*.yaml`
+Each `extends:` its template (`west_africa_template.yaml` itself `extends:
+ghana_template.yaml`, overriding only `region`, so both domains always train
+on the same variable set) and overrides only `data_root` (via `!env
+${DOWNSCALING_DATA_ROOT}`) and `start_date`/`end_date`.
+
+**Expected data layout** (one folder per variable under `data_root`):
+```
+<data_root>/<path>/[number_<member>/][level_<N>/]<name>_<date>[-<HHMM>].nc
+```
+Every ensemble member is indexed as a **separate** training sample, not averaged.
+
+**To add a new predictor variable:** add one entry to `inputs:` in
+`configs/ghana_template.yaml`. Channel counts propagate automatically —
+`train.py` probes a batch off the dataloader and passes the real channel
+count into the model factory (`models/__init__.py`) — no other file needs
+to change.
+
+**IMPORTANT — the `patch` block:** all four generators need the static/target
+grid to resolve to exactly 128×128, and variants 1/3/4 (`SRGANGenerator`,
+`HybridGenerator`, `STFAGenerator`) additionally need the dynamic input to
+resolve to exactly 9×9 (a hard-coded `PixelShuffle(4)` ×2 + `kernel_size=17`
+crop). `coarse_resolution_deg: 2.5` fixes the *physical* size of one coarse
+pixel to ERA5's real native grid spacing (the target/IMERG side is 0.1° —
+finer than the coarse side, as it must be); `coarse_shape`/`fine_shape` are
+the pixel counts the model needs. The region is then **tiled** into as many
+non-overlapping patches of that physical size as fit — one patch spans
+9 × 2.5° = 22.5° on a side, so `region: ghana` and `region: west_africa`
+(21×34°, still smaller than one patch) both currently yield a single 1×1
+patch; only a region wider than 22.5° in both directions actually benefits
+from tiling (e.g. `region: africa`, 73×72° → 3×3 = 9 patches). See the
+comment block at the top of `ghana_template.yaml` and
+`utils/folder_dataset.py`'s module docstring for the full mechanics.
 
 **Setting your data path:**
 ```bash
@@ -100,7 +121,12 @@ make test-grad      # gradient-flow checks only
 make test-v1 / test-v2 / test-v3 / test-v4   # scoped to one variant
 ```
 
-## Run training (dry run example)
+## Run training
 ```bash
-uv run train.py --data_dir ./data/ghana_grid --variant 4 --batch_size 4 --epochs 1
+# Smoke test -- synthetic data, no config or real files needed
+uv run train.py --dry_run --variant 4 --batch_size 4 --epochs 1
+
+# Real training, with validation + checkpointing
+uv run train.py --config configs/ghana_train.yaml --val_config configs/ghana_val.yaml \
+    --variant 4 --batch_size 4 --epochs 50 --warmup_epochs 5
 ```

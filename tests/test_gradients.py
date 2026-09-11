@@ -6,7 +6,8 @@ from models import get_models
 @pytest.mark.parametrize("variant_id", [1, 2, 3, 4])
 def test_graph_gradient_flows(variant_id, sample_batch):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    netG, _ = get_models(variant_id=variant_id, device=device)
+    netG, _ = get_models(variant_id, sample_batch['dynamic_input'].shape[1],
+                          sample_batch['static_input'].shape[1], device)
 
     out = netG(sample_batch['dynamic_input'].to(device), sample_batch['static_input'].to(device))
     loss = torch.mean(torch.abs(out - sample_batch['target_imerg'].to(device)))
