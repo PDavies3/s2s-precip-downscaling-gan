@@ -19,9 +19,18 @@ def log1p_inverse(x, stats):
     return np.expm1(log_x)
 
 
+def minmax_transform(x, stats):
+    return 2.0 * (x - stats["min"]) / (stats["max"] - stats["min"]) - 1.0
+
+
+def minmax_inverse(x, stats):
+    return (x + 1.0) / 2.0 * (stats["max"] - stats["min"]) + stats["min"]
+
+
 _TRANSFORMS = {
     "zscore": (zscore_transform, zscore_inverse),
     "log1p": (log1p_transform, log1p_inverse),
+    "minmax": (minmax_transform, minmax_inverse),
 }
 
 

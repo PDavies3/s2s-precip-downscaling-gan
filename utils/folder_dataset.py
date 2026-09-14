@@ -85,6 +85,33 @@ def _patch_bounds(region, patch_extent_lat_deg, patch_extent_lon_deg, patch_i, p
     }
 
 
+def _standardize_dims(da):
+    """
+    Real source files are NOT consistent about dimension naming or a
+    leftover singleton time axis -- e.g. in one real ERA5/IMERG archive,
+    ERA5 files use ('latitude', 'longitude') while IMERG files use
+    ('time', 'lon', 'lat') with time of length 1 (one file = one date).
+    Normalize both quirks so _crop_region/_resample_to_shape (which always
+    key off 'latitude'/'longitude') work regardless of the source convention.
+    """
+    rename = {}
+    if "lat" in da.dims and "latitude" not in da.dims:
+        rename["lat"] = "latitude"
+    if "lon" in da.dims and "longitude" not in da.dims:
+        rename["lon"] = "longitude"
+    if rename:
+        da = da.rename(rename)
+    if "time" in da.dims:
+        if da.sizes["time"] != 1:
+            raise ValueError(
+                f"Expected exactly one time step per file (one file = one "
+                f"date/lead_hours combination), but '{da.name}' at this path "
+                f"has {da.sizes['time']}."
+            )
+        da = da.isel(time=0)
+    return da
+
+
 def _parse_path(path):
     fname = os.path.basename(path)
     m = _FILENAME_RE.match(fname)
@@ -244,7 +271,7 @@ class ConfigurableDownscalingDataset(Dataset):
     def _load_cropped(self, path, region, resolution_deg=None, shape=None):
         ds = xr.open_dataset(path)
         var_name = list(ds.data_vars)[0]
-        da_full = ds[var_name]
+        da_full = _standardize_dims(ds[var_name])
         if shape is not None:
             return _resample_to_shape(da_full, region, shape)
         if resolution_deg is not None:
@@ -299,11 +326,16 @@ class ConfigurableDownscalingDataset(Dataset):
                 if isinstance(entry, dict):
                     path = os.path.join(self.data_root, entry["path"])
                     resolution_deg = entry.get("resolution_deg")
+                    norm_config = entry.get("normalisation")
                 else:
                     path = os.path.join(self.data_root, entry)
                     resolution_deg = None
+                    norm_config = None
                 da = self._load_cropped(path, region, resolution_deg, target_shape)
-                additional_channels.append(da.values[np.newaxis, ...])
+                arr = da.values
+                if norm_config is not None:
+                    arr = normalize(arr, norm_config)
+                additional_channels.append(arr[np.newaxis, ...])
         static_tensor = torch.from_numpy(np.concatenate(additional_channels, axis=0)).float()
 
         return {

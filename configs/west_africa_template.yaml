@@ -1,14 +1,10 @@
 # Same variables/patch settings as ghana_template.yaml, just a bigger region.
-#
-# NOTE: at ERA5's real coarse_resolution_deg=2.5, one patch spans
-# 9 * 2.5 = 22.5 deg on a side -- which is BIGGER than west_africa's own
-# 21 x 34 deg box (see utils/regions.py). So this still yields only a
-# single 1 x 1 patch per date/lead/member, same as ghana_template.yaml --
-# tiling only pays off (multiple patches) on a region wider than 22.5 deg
-# in both directions, e.g. region: africa (73 x 72 deg -> 3 x 3 = 9 patches).
-# west_africa is kept as its own config anyway since it's a physically
-# meaningful training domain in its own right, just not one that benefits
-# from tiling at this resolution -- it still trains on real 2.5 deg/pixel
-# ERA5 detail, just with one patch instead of several.
+# At coarse_resolution_deg=1.5, one patch spans 9 * 1.5 = 13.5 deg on a side.
+# west_africa (21 x 34 deg -- see utils/regions.py) tiles into 1 x 2 = 2
+# patches per date, vs. ghana's single 1 x 1 patch -- twice the training
+# samples at the exact same real coarse/fine resolution (see the `patch`
+# comment block in ghana_template.yaml for why that resolution choice was
+# made). west_africa is also a physically meaningful training domain in its
+# own right, not just a tiling exercise.
 extends: ghana_template.yaml
 region: west_africa

@@ -47,19 +47,46 @@ variables are used.
 | `patch` | `{coarse_shape, fine_shape, coarse_resolution_deg}` — see below |
 | `inputs` | List of `{name, path, normalisation, [levels], [scale]}` — single-level or pressure-level (via `levels`) dynamic predictors |
 | `target` | The IMERG precipitation variable + its normalisation |
-| `additional_data` / `additional_data_paths` | Static high-resolution context (e.g. `landmask`, `topography`), computed (`latlon`, `day_of_year`) or file-based |
+| `additional_data` / `additional_data_paths` | Static high-resolution context, computed (`latlon`, `day_of_year`) or file-based (`landmask`, `elevation`) |
 
-### `configs/ghana_train.yaml` / `configs/ghana_val.yaml` / `configs/west_africa_*.yaml`
-Each `extends:` its template (`west_africa_template.yaml` itself `extends:
-ghana_template.yaml`, overriding only `region`, so both domains always train
-on the same variable set) and overrides only `data_root` (via `!env
-${DOWNSCALING_DATA_ROOT}`) and `start_date`/`end_date`.
+Verified against a real archive at `data_root=~/era5_daily_cache`: ERA5
+`cape`/`tp`/`u_850`/`v_850`/`msl`/`tcw`/`w_{200,700,850}` (daily, 0.25°
+native, 2019-01-01 through 2021-12-31, no gaps) and IMERG `precipitation`
+(daily, 0.1° native, same period). `tcw`/`w_*` were built from raw hourly
+ERA5 (source: an external `era5_data` archive) via
+`scripts/build_daily_cache.py`, daily-averaged to match the rest of the
+archive's convention. No ensemble members. Static context: a real global
+(90N-90S, 180W-180E, 0.1° native) `landmask`/`elevation` pair at
+`data_root/static/` (covers any region, so no out-of-bounds risk) — both
+`minmax`-normalized (see `utils/normalisation.py`) to land in the same
+[-1, 1] range as `latlon`/`day_of_year`, using each file's TRUE GLOBAL
+min/max (not stats from any one resampled region — linear interpolation
+can't produce a value outside the source file's real range, so fitting on
+the global range guarantees every possible patch stays within [-1, 1], not
+just the ones already tried). Unlike `inputs`/`target`,
+`additional_data_paths` entries are NOT normalized unless you add a
+`normalisation` block yourself (the computed `latlon`/`day_of_year`
+features are self-normalizing to [-1, 1] by construction, so they don't
+need one). All 8 dynamic variables
+and all 4 static
+context channels are wired in by default.
+
+### `configs/ghana_train.yaml` / `configs/ghana_val.yaml` / `configs/west_africa_*.yaml` / `configs/africa_*.yaml`
+Each `extends:` its template (`west_africa_template.yaml` and
+`africa_template.yaml` both `extend: ghana_template.yaml`, overriding only
+`region`, so every domain always trains on the same variable set) and
+overrides only `data_root` (via `!env ${DOWNSCALING_DATA_ROOT}`) and
+`start_date`/`end_date`.
 
 **Expected data layout** (one folder per variable under `data_root`):
 ```
 <data_root>/<path>/[number_<member>/][level_<N>/]<name>_<date>[-<HHMM>].nc
 ```
-Every ensemble member is indexed as a **separate** training sample, not averaged.
+Every ensemble member is indexed as a **separate** training sample, not
+averaged. Dimension names (`latitude`/`longitude` vs. `lat`/`lon`) and a
+leftover singleton `time` axis are normalized automatically per file (see
+`utils/folder_dataset.py`'s `_standardize_dims`) — real ERA5 and IMERG files
+don't actually agree with each other on either convention.
 
 **To add a new predictor variable:** add one entry to `inputs:` in
 `configs/ghana_template.yaml`. Channel counts propagate automatically —
@@ -71,21 +98,24 @@ to change.
 grid to resolve to exactly 128×128, and variants 1/3/4 (`SRGANGenerator`,
 `HybridGenerator`, `STFAGenerator`) additionally need the dynamic input to
 resolve to exactly 9×9 (a hard-coded `PixelShuffle(4)` ×2 + `kernel_size=17`
-crop). `coarse_resolution_deg: 2.5` fixes the *physical* size of one coarse
-pixel to ERA5's real native grid spacing (the target/IMERG side is 0.1° —
-finer than the coarse side, as it must be); `coarse_shape`/`fine_shape` are
-the pixel counts the model needs. The region is then **tiled** into as many
-non-overlapping patches of that physical size as fit — one patch spans
-9 × 2.5° = 22.5° on a side, so `region: ghana` and `region: west_africa`
-(21×34°, still smaller than one patch) both currently yield a single 1×1
-patch; only a region wider than 22.5° in both directions actually benefits
-from tiling (e.g. `region: africa`, 73×72° → 3×3 = 9 patches). See the
-comment block at the top of `ghana_template.yaml` and
-`utils/folder_dataset.py`'s module docstring for the full mechanics.
+crop). `coarse_resolution_deg: 1.5` is a **deliberate coarsening** of ERA5's
+native 0.25° — not simply "the real resolution" — chosen so the implied fine
+side (one patch = 9 × 1.5 = 13.5°, over 128 fixed pixels → 0.106°/pixel)
+lands just at IMERG's real 0.1° detail limit, instead of fabricating detail
+IMERG never measured (which is what using ERA5's native 0.25° directly would
+do — 2.25°/127 ≈ 0.018°/pixel, ~6× finer than IMERG really is). It also
+makes the coarse input a more realistic stand-in for an actual coarse S2S
+forecast grid than raw ERA5 reanalysis resolution would be. See the full
+reasoning in the comment block at the top of `ghana_template.yaml`.
+
+The region is then **tiled** into as many non-overlapping patches of that
+13.5°×13.5° physical size as fit: `ghana` (7×5°) yields a single 1×1 patch,
+`west_africa` (21×34°) yields 1×2 = 2, and `africa` (73×72°) yields 5×5 = 25
+— see `utils/folder_dataset.py`'s module docstring for the full mechanics.
 
 **Setting your data path:**
 ```bash
-export DOWNSCALING_DATA_ROOT="~/Desktop/home/ws/qu5630/Leo_FAST2Africa"
+export DOWNSCALING_DATA_ROOT=~/era5_daily_cache
 ```
 
 ## IMPORTANT: known bug fixed in this version
@@ -130,3 +160,52 @@ uv run train.py --dry_run --variant 4 --batch_size 4 --epochs 1
 uv run train.py --config configs/ghana_train.yaml --val_config configs/ghana_val.yaml \
     --variant 4 --batch_size 4 --epochs 50 --warmup_epochs 5
 ```
+
+## GPU quickstart: West Africa, all 4 variants
+
+`train.py` already picks up CUDA automatically
+(`torch.device("cuda" if torch.cuda.is_available() else "cpu")`) and pins
+DataLoader memory / uses non-blocking transfers when a GPU is present — no
+flag needed to opt in.
+
+**1. Get the data onto the GPU machine.** `git pull` only brings the code —
+the real archive (`~/era5_daily_cache`, ~4.1 GB: ERA5 `cape`/`tp`/`u_850`/
+`v_850`/`msl`/`tcw`/`w_{200,700,850}`, IMERG `precipitation`, and the
+global `static/` landmask+elevation pair) is gitignored and has to be
+copied separately, e.g.:
+```bash
+rsync -avh --progress ~/era5_daily_cache gpu-machine:~/
+```
+Then on the GPU machine:
+```bash
+export DOWNSCALING_DATA_ROOT=~/era5_daily_cache
+```
+
+**2. Install dependencies** — `uv sync` (or `pip install -r requirements.txt`
+if not using uv). Make sure whatever `torch` gets installed is a CUDA build
+matching the GPU machine's CUDA version (the plain PyPI `torch` wheel is
+sometimes CPU-only — check `python -c "import torch; print(torch.cuda.is_available())"`
+after install).
+
+**3. Train each variant** (50 epochs, batch_size 16 — lower `BATCH` if you
+hit an out-of-memory error):
+```bash
+make train-west-africa-v1 BATCH=16 EPOCHS=50
+make train-west-africa-v2 BATCH=16 EPOCHS=50
+make train-west-africa-v3 BATCH=16 EPOCHS=50
+make train-west-africa-v4 BATCH=16 EPOCHS=50
+```
+Each writes best/periodic checkpoints to `./checkpoints/variant{1,2,3,4}_*.pt`
+(override with `--checkpoint_dir`, only available via the underlying
+`uv run train.py --config configs/west_africa_train.yaml --val_config
+configs/west_africa_val.yaml --variant N ...` if you need a flag the
+Makefile targets don't expose). Resume an interrupted run with
+`--resume_from <checkpoint.pt>`.
+
+**Note on cost:** on this (CPU-only) machine, one epoch of `ghana` (half of
+`west_africa`'s sample count) measured 4.5 min (variant 2) up to 72 min
+(variant 4) — see the variant-by-variant benchmark earlier in this
+project's history for the CPU numbers. A GPU should cut variants 1/3/4
+dramatically, since their runtime is dominated by a `kernel_size=17`
+convolution that GPUs handle far better than CPUs; variant 2 was already
+fast on CPU and won't change as much.

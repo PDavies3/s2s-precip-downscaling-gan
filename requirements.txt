@@ -1,10 +1,11 @@
-# Plain pip requirements for environments that don't use uv (e.g. Kaggle notebooks).
-# Kaggle already ships torch + numpy pre-installed -- keeping them here too is
-# harmless (pip will skip if satisfied) but you can drop them to save install time.
-torch>=2.2.0
-numpy>=1.26.0
-xarray>=2024.1.0
-netcdf4>=1.6.5
-cfgrib>=0.9.15
-eccodes>=1.7.0
-pytest>=8.0.0
+# Plain pip requirements for environments that don't use uv (e.g. Kaggle notebooks,
+# or a fresh GPU box). Kaggle already ships torch + numpy pre-installed -- keeping
+# them here too is harmless (pip will skip if satisfied) but you can drop them to
+# save install time.
+torch>=2.12.1
+numpy>=2.5.0
+xarray>=2026.4.0
+netcdf4>=1.7.4
+pyyaml>=6.0.3
+scipy>=1.18.0
+pytest>=9.1.1

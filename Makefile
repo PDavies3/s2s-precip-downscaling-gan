@@ -9,7 +9,9 @@ EPOCHS     ?= 50
 
 .PHONY: sync test test-fast test-dataset test-arch test-grad \
         test-v1 test-v2 test-v3 test-v4 \
-        train-v1 train-v2 train-v3 train-v4 smoke clean
+        train-v1 train-v2 train-v3 train-v4 \
+        train-west-africa-v1 train-west-africa-v2 train-west-africa-v3 train-west-africa-v4 \
+        smoke clean
 
 ## Install/sync all dependencies into local .venv
 sync:
@@ -63,6 +65,17 @@ train-v3:
 	uv run train.py --config $(CONFIG) --val_config $(VAL_CONFIG) --variant 3 --batch_size $(BATCH) --epochs $(EPOCHS)
 train-v4:
 	uv run train.py --config $(CONFIG) --val_config $(VAL_CONFIG) --variant 4 --batch_size $(BATCH) --epochs $(EPOCHS)
+
+## Real training runs on the west_africa domain (override BATCH/EPOCHS as needed).
+## Requires DOWNSCALING_DATA_ROOT set to wherever ~/era5_daily_cache lives.
+train-west-africa-v1:
+	uv run train.py --config configs/west_africa_train.yaml --val_config configs/west_africa_val.yaml --variant 1 --batch_size $(BATCH) --epochs $(EPOCHS)
+train-west-africa-v2:
+	uv run train.py --config configs/west_africa_train.yaml --val_config configs/west_africa_val.yaml --variant 2 --batch_size $(BATCH) --epochs $(EPOCHS)
+train-west-africa-v3:
+	uv run train.py --config configs/west_africa_train.yaml --val_config configs/west_africa_val.yaml --variant 3 --batch_size $(BATCH) --epochs $(EPOCHS)
+train-west-africa-v4:
+	uv run train.py --config configs/west_africa_train.yaml --val_config configs/west_africa_val.yaml --variant 4 --batch_size $(BATCH) --epochs $(EPOCHS)
 
 ## Clean caches
 clean:

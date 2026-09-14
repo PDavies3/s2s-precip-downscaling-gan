@@ -32,6 +32,17 @@ def _write_nc(path, var_name, data, lat, lon):
     xr.Dataset({var_name: da}).to_netcdf(path)
 
 
+def _write_nc_lat_lon_time(path, var_name, data, lat, lon, date):
+    # Mirrors a real quirk seen in an actual ERA5/IMERG archive: IMERG files
+    # use short dim names ('lat'/'lon' instead of 'latitude'/'longitude')
+    # plus a singleton 'time' axis, while the ERA5 input files next to them
+    # use 'latitude'/'longitude' with no time axis at all.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    da = xr.DataArray(data[np.newaxis, :, :], dims=("time", "lat", "lon"),
+                       coords={"time": [np.datetime64(date)], "lat": lat, "lon": lon})
+    xr.Dataset({var_name: da}).to_netcdf(path)
+
+
 @pytest.fixture
 def folder_tree_root(tmp_path):
     root = tmp_path / "mock_dataset"
@@ -96,5 +107,30 @@ def wide_folder_tree_root(tmp_path):
     _write_nc(root / "static" / "landmask.nc", "landmask", landmask, lat, lon)
     topography = rng.normal(500.0, 300.0, size=(len(lat), len(lon))).astype("float32")
     _write_nc(root / "static" / "topography.nc", "topography", topography, lat, lon)
+
+    return {"root": str(root), "dates": dates}
+
+
+@pytest.fixture
+def era5_imerg_style_root(tmp_path):
+    # Dynamic (ERA5-style: 'latitude'/'longitude', no time axis) and target
+    # (IMERG-style: 'lat'/'lon' + singleton 'time' axis) files side by side,
+    # exercising the real-world dim-naming quirk _standardize_dims handles.
+    root = tmp_path / "era5_imerg_style"
+    dates = ["2020-01-01", "2020-01-02"]
+    lat = np.linspace(4.5, 11.5, 8)
+    lon = np.linspace(-3.5, 1.5, 8)
+    rng = np.random.default_rng(3)
+
+    for date in dates:
+        data = rng.normal(300.0, 5.0, size=(len(lat), len(lon))).astype("float32")
+        _write_nc(root / "cape" / f"cape_{date}.nc", "cape", data, lat, lon)
+
+        target = rng.exponential(0.5, size=(len(lat), len(lon))).astype("float32")
+        _write_nc_lat_lon_time(root / "imerg" / f"imerg_daily_{date}.nc",
+                                "precipitation", target, lat, lon, date)
+
+    landmask = (rng.random(size=(len(lat), len(lon))) > 0.5).astype("float32")
+    _write_nc(root / "static" / "landmask.nc", "landmask", landmask, lat, lon)
 
     return {"root": str(root), "dates": dates}

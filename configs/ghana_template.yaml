@@ -1,42 +1,58 @@
 # ==============================================================================
-# ghana_template.yaml -- base variable/region declarations for the ERA5 (2.5
-# deg) -> IMERG (0.1 deg) downscaling pipeline. `ghana_train.yaml` /
-# `ghana_val.yaml` `extends` this file and only override
-# data_root/start_date/end_date, so the two can never drift apart on which
-# variables are trained on.
+# ghana_template.yaml -- base variable/region declarations for the ERA5 ->
+# IMERG downscaling pipeline. `ghana_train.yaml` / `ghana_val.yaml` `extends`
+# this file and only override data_root/start_date/end_date, so the two can
+# never drift apart on which variables are trained on.
 #
-# Expected data layout (one folder per variable, under data_root):
-#   <data_root>/<path>/[number_<member>/][level_<N>/]<name>_<date>[-<HHMM>].nc
-# e.g. data_root/t2m/t2m_2025-05-01-0000.nc
-#      data_root/u/level_700/u_2025-05-01-0000.nc      (pressure-level var)
-#      data_root/u/level_700/number_3/u_2025-05-01-0000.nc  (ensemble member)
-# Every ensemble member is indexed as a SEPARATE sample (not averaged).
+# Verified against the real archive at data_root=~/era5_daily_cache:
+#   ERA5/era5_cape/cape_YYYY-MM-DD.nc   (data var: cape,  latitude/longitude, no time axis)
+#   ERA5/era5_tp/tp_YYYY-MM-DD.nc       (data var: tp)
+#   ERA5/era5_u_850/u_850_YYYY-MM-DD.nc (data var: u, single fixed 850hPa level -- no `levels:` needed)
+#   ERA5/era5_v_850/v_850_YYYY-MM-DD.nc (data var: v)
+#   ERA5/era5_msl/msl_YYYY-MM-DD.nc     (data var: msl)
+#   ERA5/era5_tcw/tcw_YYYY-MM-DD.nc     (data var: tcw -- total column water)
+#   ERA5/era5_w_{200,700,850}/w_YYYY-MM-DD.nc (data var: w -- vertical velocity,
+#                                         one dedicated folder per pressure level,
+#                                         same single-level-per-folder convention as u_850/v_850)
+# tcw/w_* were built from raw HOURLY ERA5 (source: /media/pdavies/T7 Shield/era5_data,
+# via scripts/build_daily_cache.py) and daily-averaged to match the convention
+# above -- verified the daily-mean matches the true mean of that day's 24
+# hourly values (same aggregation the existing cape/msl/u/v/tp folders use).
+#   imerg/imerg_daily_YYYY-MM-DD.nc     (data var: precipitation, lat/lon + singleton time axis --
+#                                         utils/folder_dataset.py's _standardize_dims handles both
+#                                         this and ERA5's different dim naming transparently)
+# ERA5 native resolution: 0.25 deg. IMERG native resolution: 0.1 deg. No
+# ensemble members, no static landmask/topography files in this archive --
+# additional_data below uses COMPUTED features (latlon, day_of_year) instead.
+# Confirmed complete daily coverage 2019-01-01 to 2021-12-31 (1096 files, no gaps).
 #
 # IMPORTANT -- all four generators need the static/target grid to resolve to
 # exactly 128x128, and variants 1/3/4 (SRGANGenerator, HybridGenerator,
 # STFAGenerator) additionally need the dynamic input to resolve to exactly
 # 9x9 (their PixelShuffle(4) x2 + kernel_size=17 valid-conv crop is hard-coded
-# for 9 -> 36 -> 144 -> crop 17 -> 128). The `patch` block below is how that's
-# satisfied WITHOUT squashing a whole region into one shape-distorted sample:
+# for 9 -> 36 -> 144 -> crop 17 -> 128). The `patch` block below satisfies
+# that WITHOUT squashing a whole region into one shape-distorted sample --
+# see utils/folder_dataset.py's module docstring for the tiling mechanics.
 #
-#   coarse_resolution_deg = 2.5 (ERA5's native grid spacing) fixes the
-#   PHYSICAL size of one coarse pixel. coarse_shape/fine_shape are the pixel
-#   counts the model needs. One "patch" therefore covers
-#   coarse_shape[0] * coarse_resolution_deg = 9 * 2.5 = 22.5 deg on a side --
-#   the region is tiled into as many non-overlapping patches of that physical
-#   size as fit, so a BIGGER region (e.g. region: west_africa, see
-#   configs/west_africa_template.yaml) yields MORE training samples at the
-#   same real resolution, rather than the same one sample stretched thinner.
-#   A region smaller than one patch (e.g. ghana alone, 7x5 deg, vs. a
-#   22.5x22.5 deg patch) still yields exactly one patch, whose bounds extend
-#   a bit past the named region -- that's the model's fixed receptive field,
-#   not a bug; see utils/folder_dataset.py's module docstring.
-#
-#   The fine side is bound by the SAME 22.5 deg patch footprint, resampled to
-#   exactly 128 pixels (fixed by the model) -> 22.5/127 = 0.177 deg/pixel.
-#   IMERG's native resolution is 0.1 deg (finer than that), so this is a
-#   downsample of the true label detail to fit the model's fixed output size,
-#   not fabricated resolution -- expected, not an error.
+#   coarse_resolution_deg=1.5 is a DELIBERATE coarsening of ERA5's native
+#   0.25 deg (not "confirm against real data" guesswork anymore -- it's a
+#   real, small tradeoff worth knowing about):
+#     - One patch spans 9 * 1.5 = 13.5 deg on a side.
+#     - The fine/target side is bound by that SAME 13.5 deg footprint over
+#       128 pixels (fixed by the model) -> 13.5/127 = 0.106 deg/pixel --
+#       just slightly coarser than IMERG's real 0.1 deg detail, so the
+#       target is a near-lossless downsample of true label information,
+#       not fabricated resolution.
+#     - Using ERA5 at its native 0.25 deg instead would make one patch only
+#       2.25 deg wide -> 2.25/127 = 0.0177 deg/pixel target spacing, i.e.
+#       ~6x FINER than IMERG's actual resolution -- the model would be
+#       trained against a smoothly bilinear-interpolated pseudo-target
+#       fabricating detail IMERG never measured.
+#     - 1.5 deg/pixel coarse input is also a more realistic stand-in for a
+#       genuinely coarse S2S forecast grid than ERA5's own native 0.25 deg
+#       reanalysis resolution would be.
+#   Revisit this if the modeling goal changes (e.g. a resolution-adaptive
+#   architecture would remove the fine_shape=128 constraint driving this).
 # ==============================================================================
 
 region: ghana
@@ -44,78 +60,101 @@ region: ghana
 patch:
   coarse_shape: [9, 9]
   fine_shape: [128, 128]
-  coarse_resolution_deg: 2.5  # ERA5 native grid spacing
+  coarse_resolution_deg: 1.5
 
 inputs:
-  # -- single-level surface variables --
-  - name: t2m
-    path: t2m
-    normalisation:
-      type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
-  - name: d2m
-    path: d2m
-    normalisation:
-      type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
   - name: cape
-    path: cape
+    path: ERA5/era5_cape
     normalisation:
       type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
-  - name: tciw
-    path: tciw
+      stats: {mean: 701.398804, std: 643.376343}
+  - name: tp
+    path: ERA5/era5_tp
+    scale: 1000  # ERA5 tp is in metres -- convert to mm to match IMERG's units
     normalisation:
-      type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: confirm shortName (tciw/tcw/tcwv?) + real stats
-  - name: msl
-    path: msl
-    normalisation:
-      type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
-  - name: u10
-    path: u10
-    normalisation:
-      type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
-  - name: v10
-    path: v10
-    normalisation:
-      type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
-  - name: mx2t
-    path: mx2t
-    normalisation:
-      type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
-
-  # -- pressure-level variables: one channel per entry in `levels` --
+      type: log1p
+      stats: {log1p_mean: 0.859933, log1p_std: 0.919867}
   - name: u
-    path: u
-    levels: [700, 500]
+    path: ERA5/era5_u_850
     normalisation:
       type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
-  - name: w
-    path: w
-    levels: [700, 500]
+      stats: {mean: -1.032051, std: 3.381918}
+  - name: v
+    path: ERA5/era5_v_850
     normalisation:
       type: zscore
-      stats: {mean: 0.0, std: 1.0}  # TODO: replace with real stats once data exists
+      stats: {mean: -0.546159, std: 2.125686}
+  - name: msl
+    path: ERA5/era5_msl
+    normalisation:
+      type: zscore
+      stats: {mean: 101114.507812, std: 180.131577}
+  - name: tcw
+    path: ERA5/era5_tcw
+    normalisation:
+      type: zscore
+      stats: {mean: 42.983540, std: 12.223594}
+  - name: w_200
+    path: ERA5/era5_w_200
+    normalisation:
+      type: zscore
+      stats: {mean: -0.004439, std: 0.056397}
+  - name: w_700
+    path: ERA5/era5_w_700
+    normalisation:
+      type: zscore
+      stats: {mean: -0.012767, std: 0.086468}
+  - name: w_850
+    path: ERA5/era5_w_850
+    normalisation:
+      type: zscore
+      stats: {mean: -0.030067, std: 0.114551}
 
 target:
   name: precipitation
   path: imerg
   normalisation:
     type: log1p
-    stats: {log1p_mean: 0.0, log1p_std: 1.0}  # TODO: replace with real stats once data exists
+    stats: {log1p_mean: 1.772528, log1p_std: 2.269520}
 
-# Static high-resolution context. Two SEPARATE single-variable files --
-# a shared multi-variable file would silently collide (the loader takes
-# the file's first data variable, whichever name asks for it).
+# Real global (90N-90S, 180W-180E) 0.1 deg static context, added at
+# data_root=~/era5_daily_cache/static -- covers any region/patch on Earth,
+# so no out-of-bounds risk regardless of which named region is used.
+# Both files' data variable is generically named "data" (not "elevation" /
+# "land_mask") -- fine, _load_cropped always takes a file's first data var
+# regardless of the name declared here. Combined with the computed latlon
+# (still useful to distinguish patches in multi-patch configs like
+# africa_template.yaml) and day_of_year (seasonality, not geography).
+#
+# landmask/elevation are normalized via `minmax` so they land in the exact
+# same [-1, 1] range as latlon/day_of_year (unlike inputs/target, which are
+# NOT normalized at all by default -- computed features are self-normalizing
+# by construction, but raw elevation in metres or a raw land-use code isn't,
+# so it needs an explicit `normalisation` block same as inputs/target).
+#
+# min/max below are the TRUE GLOBAL min/max of the RAW file (not stats from
+# any one resampled region) -- this matters: an earlier version used stats
+# fit on a west_africa-resampled sample, and Ghana's own patch (mostly
+# coastal, sharp land/sea transitions) interpolated slightly OUTSIDE that
+# sample's range (landmask reached 1.82, still within [-1,1] but closer
+# than expected). Linear interpolation is a convex combination of the
+# surrounding source grid points, so it can never produce a value outside
+# the ORIGINAL file's true global range -- fitting min/max on that global
+# range instead mathematically guarantees every possible resampled patch,
+# anywhere, stays within [-1, 1], not just the ones already tried.
 additional_data:
   - landmask
-  - topography
+  - elevation
+  - latlon
+  - day_of_year
 additional_data_paths:
-  landmask: static/landmask.nc
-  topography: static/topography.nc
+  landmask:
+    path: static/land_mask__src-gmt__res-06m__lat-m90-90__lon-m180-180__1800x3600px.nc
+    normalisation:
+      type: minmax
+      stats: {min: 0.0, max: 3.0}
+  elevation:
+    path: static/elevation__src-gmt__res-06m__lat-m90-90__lon-m180-180__1800x3600px.nc
+    normalisation:
+      type: minmax
+      stats: {min: -10210.0, max: 6276.0}

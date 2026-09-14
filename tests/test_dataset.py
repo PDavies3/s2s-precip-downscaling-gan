@@ -137,3 +137,51 @@ def test_region_smaller_than_one_patch_still_yields_a_single_patch(wide_folder_t
     assert ds._n_lon_patches == 1
     sample = ds[0]
     assert sample["dynamic_input"].shape[-2:] == (2, 2)
+
+
+def test_handles_lat_lon_short_names_and_singleton_time_axis(era5_imerg_style_root):
+    # Real-world quirk: an actual ERA5/IMERG archive has ERA5 files using
+    # ('latitude', 'longitude') with no time axis, while IMERG files use
+    # ('time', 'lat', 'lon') with a singleton time axis -- both must load
+    # into the same sample without the caller needing to know the difference.
+    config = {
+        "data_root": era5_imerg_style_root["root"],
+        "region": "ghana",
+        "inputs": [
+            {"name": "cape", "path": "cape",
+             "normalisation": {"type": "zscore", "stats": {"mean": 300.0, "std": 5.0}}},
+        ],
+        "target": {"name": "precipitation", "path": "imerg",
+                   "normalisation": {"type": "log1p", "stats": {"log1p_mean": 0.08, "log1p_std": 0.27}}},
+        "additional_data": ["landmask"],
+        "additional_data_paths": {"landmask": "static/landmask.nc"},
+    }
+    ds = ConfigurableDownscalingDataset(config)
+    assert len(ds) == len(era5_imerg_style_root["dates"])
+    sample = ds[0]
+    assert sample["target"].dim() == 3  # [1, H, W] -- no leftover time axis
+    assert sample["dynamic_input"].shape[-2:] == sample["target"].shape[-2:]
+
+
+def test_additional_data_path_without_normalisation_stays_raw(folder_tree_root):
+    # Backward compatibility: a plain string entry (no normalisation block)
+    # must still work exactly as before.
+    config = _base_config(folder_tree_root["root"])
+    ds = ConfigurableDownscalingDataset(config)
+    sample = ds[0]
+    landmask_channel = sample["static_input"][0].numpy()
+    assert set(landmask_channel.ravel().tolist()) <= {0.0, 1.0}  # raw 0/1 mask, untouched
+
+
+def test_additional_data_path_normalisation_is_applied(folder_tree_root):
+    config = _base_config(folder_tree_root["root"])
+    config["additional_data_paths"] = {
+        "landmask": {"path": "static/landmask.nc",
+                     "normalisation": {"type": "zscore", "stats": {"mean": 0.5, "std": 0.5}}},
+        "topography": "static/topography.nc",
+    }
+    ds = ConfigurableDownscalingDataset(config)
+    sample = ds[0]
+    landmask_channel = sample["static_input"][0].numpy()
+    # raw landmask is a 0/1 mask; zscore with mean=0.5, std=0.5 maps it to -1/+1.
+    assert set(landmask_channel.ravel().tolist()) <= {-1.0, 1.0}
