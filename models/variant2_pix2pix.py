@@ -11,7 +11,13 @@ class Pix2PixGenerator(nn.Module):
         
         self.up1 = nn.Sequential(nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1), nn.BatchNorm2d(128), nn.ReLU())
         self.up2 = nn.Sequential(nn.ConvTranspose2d(256, 64, kernel_size=4, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU())
-        self.final = nn.Sequential(nn.ConvTranspose2d(128, out_channels, kernel_size=4, stride=2, padding=1), nn.ReLU())
+        # No output activation: the training target is a z-scored log1p precip value
+        # (configs/ghana_template.yaml), negative for any below-average log-precip --
+        # including every dry pixel. A non-negative activation here (ReLU/Softplus)
+        # makes most of the target range unreachable and the generator collapses to a
+        # constant near 0. Physical (mm) non-negativity is guaranteed by expm1 at
+        # denormalization time, not needed here.
+        self.final = nn.ConvTranspose2d(128, out_channels, kernel_size=4, stride=2, padding=1)
         
     def forward(self, dynamic_in, static_in):
         coarse_interp = F.interpolate(dynamic_in, size=(128, 128), mode='bilinear', align_corners=False)

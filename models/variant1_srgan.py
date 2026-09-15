@@ -26,10 +26,16 @@ class SRGANGenerator(nn.Module):
         )
         # Symmetrical center boundary alignment compression map to exactly 128x128 
         self.final_crop = nn.Conv2d(64, out_channels, kernel_size=17, stride=1, padding=0)
-        self.activation = nn.ReLU() # Assures preservation of non-negative physics bounds
-        
+        # No output activation: the training target is a z-scored log1p precip value
+        # (configs/ghana_template.yaml), which is negative for any below-average
+        # log-precip -- including every dry pixel (log1p(0) alone z-scores to about
+        # -0.78). A non-negative activation here (ReLU/Softplus) makes most of the
+        # target range unreachable, so the generator collapses to a constant near 0
+        # within a couple of epochs and stops learning. Non-negativity of the
+        # physical (mm) output is already guaranteed by expm1 at denormalization time.
+
     def forward(self, dynamic_in, static_in=None):
         x = self.conv1(dynamic_in)
         x = self.res_blocks(x) + x
         x = self.upscale(x)
-        return self.activation(self.final_crop(x))
+        return self.final_crop(x)

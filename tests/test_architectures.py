@@ -11,7 +11,10 @@ def test_generator_spatial_shapes(variant_id, sample_batch):
 
     out = netG(sample_batch['dynamic_input'].to(device), sample_batch['static_input'].to(device))
     assert out.shape == (sample_batch['dynamic_input'].shape[0], 1, *sample_batch['static_input'].shape[-2:])
-    assert torch.all(out >= 0)
+    # Generator output lives in the same normalized (z-scored log1p) space as the
+    # training target, which is legitimately negative for any below-average
+    # log-precip pixel -- so no non-negativity constraint here. Physical (mm)
+    # non-negativity is guaranteed by expm1 at denormalization time instead.
 
 
 @pytest.mark.parametrize("variant_id", [1, 2, 3, 4])
