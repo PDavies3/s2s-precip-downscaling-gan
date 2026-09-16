@@ -1,17 +1,24 @@
 import argparse
 import os
+import warnings
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from models import get_models
 from utils.config_loader import load_config
 from utils.folder_dataset import ConfigurableDownscalingDataset
 from utils.normalisation import denormalize
 from utils.visualization import plot_prediction_vs_target
+
+# Benign xarray/netCDF4 warnings fired on (almost) every file read -- silenced so they
+# don't drown out the per-epoch training log.
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"xarray\..*")
+warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"xarray\..*")
 
 CRITERION_GAN = nn.BCEWithLogitsLoss()
 CRITERION_PIXEL = nn.L1Loss()
@@ -192,7 +199,9 @@ def train(args):
         sum_loss_D = sum_loss_G = sum_loss_G_adv = sum_loss_G_pixel = 0.0
         n_batches = 0
 
-        for batch in train_loader:
+        epoch_tag = "(warmup)" if not use_adversarial else ""
+        progress = tqdm(train_loader, desc=f"Epoch [{epoch+1}/{args.epochs}] {epoch_tag}".strip(), leave=False)
+        for batch in progress:
             dynamics = batch["dynamic_input"].to(device, non_blocking=True)
             statics = batch["static_input"].to(device, non_blocking=True)
             real_rain = batch["target"].to(device, non_blocking=True)
@@ -212,6 +221,8 @@ def train(args):
             sum_loss_G_adv += loss_G_adv
             sum_loss_G_pixel += loss_G_pixel
             n_batches += 1
+            progress.set_postfix(D=f"{sum_loss_D/n_batches:.4f}", G_adv=f"{sum_loss_G_adv/n_batches:.4f}",
+                                  G_pix=f"{sum_loss_G_pixel/n_batches:.4f}")
 
         n = max(n_batches, 1)
         tag = "(warmup, no adversarial) " if not use_adversarial else ""

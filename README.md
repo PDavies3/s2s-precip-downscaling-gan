@@ -165,6 +165,13 @@ prediction/target/difference plot (all denormalized to mm) to
 last plot (validation hasn't improved in that interval), it skips instead of
 re-rendering an identical plot.
 
+**Console output.** Each epoch shows a live `tqdm` progress bar (with running
+`Loss_D`/`Loss_G_adv`/`Loss_G_pixel` in the postfix) over the training
+batches, then prints the epoch's summary line once it finishes. A handful of
+benign `DeprecationWarning`/`RuntimeWarning` messages that xarray's netCDF4
+backend fires on (almost) every file read are filtered out at the top of
+`train.py` so they don't drown out the log.
+
 ## Setup
 
 Using `uv` (recommended):
