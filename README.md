@@ -128,6 +128,43 @@ RuntimeError: expected input[...] to have 64 channels, but got 16 channels inste
 These files are NOT included here. Only the corrected `variant*_*.py` files are used.
 Do not reintroduce the old `_v1`/`_v2`/`_v3`/`_v4`-suffixed files into this folder.
 
+## Model design notes
+
+**No output activation on any generator.** The target fed to the pixel loss
+is the `log1p` normalization from `target:` in `configs/ghana_template.yaml`
+— which, despite the name, is a *z-scored* log1p value
+(`(log1p(x) - log1p_mean) / log1p_std`), not a plain log1p. That's negative
+for any below-average log-precip pixel, including every dry pixel (`log1p(0)`
+alone z-scores to about -0.78) — so on a semi-arid domain, most target pixels
+are negative. Forcing a non-negative output activation (`ReLU`, and
+`Softplus` doesn't fix it either — both were tried) makes most of that range
+unreachable, and the generator collapses to a near-constant output within a
+couple of epochs, freezing the training loss. Physical (mm) non-negativity
+of the final prediction is already guaranteed by the `expm1` inverse
+transform at denormalization time, so it doesn't need to be enforced a
+second time in normalized training space.
+
+**Checkpoint selection metric.** `validate()` in `train.py` denormalizes both
+prediction and target back to physical mm before computing MAE (rather than
+comparing raw z-scored log1p values), so `Val_MAE_mm` and the "best"
+checkpoint are judged in a physically meaningful unit.
+
+**`--save_best_only`.** Skips the periodic `--checkpoint_every` snapshots and
+only writes `variant{N}_best.pt` when validation MAE improves. Requires
+`--val_config` (otherwise nothing would ever be saved). Default behavior
+(periodic + best) is unchanged if you don't pass it.
+
+**`--plot_every N`** (default 20, `0` disables). Every `N` epochs, reloads
+the *current best* checkpoint (not necessarily this epoch's live weights)
+and predicts on a fixed validation sample — always the same one (val loader
+index 0, deterministic since validation isn't shuffled) so you can visually
+track how the same location/date improves across training, rather than
+comparing against a different random patch each time. Saves a 1x3
+prediction/target/difference plot (all denormalized to mm) to
+`<checkpoint_dir>/plots/`. If the best checkpoint hasn't changed since the
+last plot (validation hasn't improved in that interval), it skips instead of
+re-rendering an identical plot.
+
 ## Setup
 
 Using `uv` (recommended):

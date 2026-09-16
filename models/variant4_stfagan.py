@@ -26,12 +26,7 @@ class STFAGenerator(nn.Module):
             nn.Conv2d(32, 64, kernel_size=3, padding=1), nn.LeakyReLU(0.2)
         )
         self.attention_gate = SpatialAttentionGate(F_g=64, F_l=64, F_int=32)
-        # No activation on the final conv: the training target is a z-scored log1p
-        # precip value (configs/ghana_template.yaml), negative for any below-average
-        # log-precip -- including every dry pixel. A non-negative activation here
-        # (ReLU/Softplus) makes most of the target range unreachable and the generator
-        # collapses to a constant near 0. Physical (mm) non-negativity is guaranteed by
-        # expm1 at denormalization time, not needed here.
+        # No activation on the final conv -- see README.md "Model design notes".
         self.reconstruct = nn.Sequential(
             nn.Conv2d(128, 64, kernel_size=3, padding=1), nn.PReLU(),
             nn.Conv2d(64, out_channels, kernel_size=1)

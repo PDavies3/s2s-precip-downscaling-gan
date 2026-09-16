@@ -95,8 +95,6 @@ def validate(netG, val_loader, device, target_norm_config):
         statics = batch["static_input"].to(device, non_blocking=True)
         real_rain = batch["target"].to(device, non_blocking=True)
         fake_rain = netG(dynamics, statics)
-        # Compare in physical mm, not normalized (z-scored log1p) space -- that's the
-        # unit checkpoint selection should be judged in, not an arbitrary z-score scale.
         real_mm = denormalize(real_rain.cpu().numpy(), target_norm_config)
         fake_mm = denormalize(fake_rain.cpu().numpy(), target_norm_config)
         total_mae_mm += np.abs(fake_mm - real_mm).mean()
