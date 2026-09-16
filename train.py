@@ -19,6 +19,7 @@ from utils.visualization import plot_prediction_vs_target
 # don't drown out the per-epoch training log.
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"xarray\..*")
 warnings.filterwarnings("ignore", category=RuntimeWarning, module=r"xarray\..*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"cartopy\..*")
 
 CRITERION_GAN = nn.BCEWithLogitsLoss()
 CRITERION_PIXEL = nn.L1Loss()
@@ -260,10 +261,12 @@ def train(args):
                                           plot_batch["static_input"].to(device))
                     pred_mm = denormalize(pred[0, 0].cpu().numpy(), target_norm)
                     target_mm = denormalize(plot_batch["target"][0, 0].numpy(), target_norm)
+                    lat = plot_batch["lat"][0].numpy()
+                    lon = plot_batch["lon"][0].numpy()
 
                     plot_path = os.path.join(plot_dir, f"variant{args.variant}_epoch{epoch+1}.png")
                     plot_prediction_vs_target(
-                        pred_mm, target_mm, plot_path,
+                        pred_mm, target_mm, lat, lon, plot_path,
                         title=f"Variant {args.variant} -- best checkpoint (epoch {best_ckpt['epoch']}) "
                               f"-- evaluated at epoch {epoch+1}",
                     )

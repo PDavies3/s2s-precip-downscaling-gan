@@ -342,6 +342,8 @@ class ConfigurableDownscalingDataset(Dataset):
             "dynamic_input": dynamic_tensor,
             "static_input": static_tensor,
             "target": target_tensor,
+            "lat": torch.from_numpy(ctx["lat"].copy()).float(),
+            "lon": torch.from_numpy(ctx["lon"].copy()).float(),
             "meta": {"date": date_str, "lead_hours": lead_hours,
                      "member": member if member is not None else -1,
                      "patch": (patch_i, patch_j) if self.patch is not None else None},

@@ -165,6 +165,16 @@ prediction/target/difference plot (all denormalized to mm) to
 last plot (validation hasn't improved in that interval), it skips instead of
 re-rendering an identical plot.
 
+The plot is georeferenced with Cartopy (`utils/visualization.py`) — each
+panel is a `PlateCarree` map with real coastlines, country borders, and
+lat/lon gridlines, using the sample's own `lat`/`lon` coordinate arrays
+(added to `ConfigurableDownscalingDataset.__getitem__`'s returned dict
+alongside `dynamic_input`/`static_input`/`target`). Note: the figure
+deliberately skips `fig.tight_layout()` in favor of fixed
+`subplots_adjust` margins — combined with `gridlines(draw_labels=True)`,
+`tight_layout()` can trigger a cartopy/shapely `GEOSException` on a
+degenerate gridline-label clip polygon.
+
 **Console output.** Each epoch shows a live `tqdm` progress bar (with running
 `Loss_D`/`Loss_G_adv`/`Loss_G_pixel` in the postfix) over the training
 batches, then prints the epoch's summary line once it finishes. A handful of
