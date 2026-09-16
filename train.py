@@ -11,6 +11,7 @@ from models import get_models
 from utils.config_loader import load_config
 from utils.folder_dataset import ConfigurableDownscalingDataset
 from utils.normalisation import denormalize
+from utils.visualization import plot_prediction_vs_target
 
 CRITERION_GAN = nn.BCEWithLogitsLoss()
 CRITERION_PIXEL = nn.L1Loss()
@@ -180,6 +181,10 @@ def train(args):
     optimizer_D = torch.optim.Adam(netD.parameters(), lr=args.lr, betas=(0.5, 0.999))
 
     best_score = float("inf")
+    best_epoch = None
+    last_plotted_epoch = None
+    best_path = os.path.join(args.checkpoint_dir, f"variant{args.variant}_best.pt")
+    plot_dir = args.plot_dir or os.path.join(args.checkpoint_dir, "plots")
 
     for epoch in range(args.epochs):
         use_adversarial = epoch >= args.warmup_epochs
@@ -222,10 +227,39 @@ def train(args):
 
             if val_metrics["mae_mm"] < best_score:
                 best_score = val_metrics["mae_mm"]
-                best_path = os.path.join(args.checkpoint_dir, f"variant{args.variant}_best.pt")
+                best_epoch = epoch + 1
                 _save_checkpoint(best_path, netG, netD, args.variant, epoch + 1,
                                   extra={"val_mae_mm": val_metrics["mae_mm"]})
                 print(f"           >> New best (val_mae_mm={best_score:.4f}). Saved to {best_path}")
+
+            if args.plot_every > 0 and (epoch + 1) % args.plot_every == 0:
+                if best_epoch is None:
+                    print("           >> Skipping validation plot: no best checkpoint saved yet")
+                elif best_epoch == last_plotted_epoch:
+                    print(f"           >> Skipping validation plot: best checkpoint unchanged "
+                          f"since last plot (still epoch {best_epoch})")
+                else:
+                    plot_netG, _ = get_models(args.variant, dynamic_channels, static_channels, device)
+                    best_ckpt = torch.load(best_path, map_location=device, weights_only=False)
+                    plot_netG.load_state_dict(best_ckpt["generator_state_dict"])
+                    plot_netG.eval()
+
+                    plot_batch = next(iter(val_loader))
+                    target_norm = val_dataset.target_spec["normalisation"]
+                    with torch.no_grad():
+                        pred = plot_netG(plot_batch["dynamic_input"].to(device),
+                                          plot_batch["static_input"].to(device))
+                    pred_mm = denormalize(pred[0, 0].cpu().numpy(), target_norm)
+                    target_mm = denormalize(plot_batch["target"][0, 0].numpy(), target_norm)
+
+                    plot_path = os.path.join(plot_dir, f"variant{args.variant}_epoch{epoch+1}.png")
+                    plot_prediction_vs_target(
+                        pred_mm, target_mm, plot_path,
+                        title=f"Variant {args.variant} -- best checkpoint (epoch {best_ckpt['epoch']}) "
+                              f"-- evaluated at epoch {epoch+1}",
+                    )
+                    last_plotted_epoch = best_epoch
+                    print(f"           >> Saved validation plot to {plot_path}")
 
         if not args.save_best_only and ((epoch + 1) % args.checkpoint_every == 0 or epoch == args.epochs - 1):
             ckpt_path = os.path.join(args.checkpoint_dir, f"variant{args.variant}_epoch{epoch+1}.pt")
@@ -250,6 +284,12 @@ def main():
     parser.add_argument("--save_best_only", action="store_true",
                          help="Skip periodic --checkpoint_every snapshots; only save "
                               "variant{N}_best.pt when validation improves (requires --val_config).")
+    parser.add_argument("--plot_every", type=int, default=20,
+                         help="Epoch interval for saving a pred/target/diff diagnostic plot from the "
+                              "current best checkpoint against a fixed validation sample (0 disables; "
+                              "no-op without --val_config).")
+    parser.add_argument("--plot_dir", type=str, default=None,
+                         help="Directory for diagnostic plots (default: <checkpoint_dir>/plots)")
     parser.add_argument("--resume_from", type=str, default=None, help="Path to a checkpoint to resume generator weights from")
     parser.add_argument("--dry_run", action="store_true", help="Train on synthetic data -- no real config/files needed")
     parser.add_argument("--dry_run_steps", type=int, default=3)
