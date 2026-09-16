@@ -20,7 +20,8 @@ Verified working on CPU: `pytest tests/ -v` → 23 passed.
 ## Structure
 ```
 configs/                # YAML configs: variables, region, normalisation, dates (extends-based)
-train.py                # CLI entrypoint: --config/--val_config, --variant {1,2,3,4}, --dry_run
+train.py                # training CLI entrypoint: --config/--val_config, --variant {1,2,3,4}, --dry_run
+inference.py            # inference CLI entrypoint: run a trained checkpoint over a config-driven dataset
 models/                 # generators, discriminator, factory router
 utils/config_loader.py  # YAML loader (`extends` inheritance, `!env` tags)
 utils/regions.py        # named region presets (africa / west_africa / ghana)
@@ -214,6 +215,33 @@ uv run train.py --dry_run --variant 4 --batch_size 4 --epochs 1
 uv run train.py --config configs/ghana_train.yaml --val_config configs/ghana_val.yaml \
     --variant 4 --batch_size 4 --epochs 50 --warmup_epochs 5
 ```
+
+## Run inference
+
+`inference.py` loads a trained checkpoint and runs it over any config-driven
+dataset (typically the val config, or a held-out test config with a
+different `start_date`/`end_date`), producing physical (mm) outputs rather
+than training-time diagnostics:
+
+```bash
+uv run inference.py --config configs/ghana_val.yaml --variant 4 \
+    --checkpoint checkpoints/variant4_best.pt --output_dir predictions/ \
+    --plot_every_n 5
+```
+
+For each sample it writes:
+- `predictions/netcdf/variant{N}_<date>_<lead>h[_m<member>][_p<i>-<j>].nc` — an
+  `xarray` dataset with `precipitation_pred`/`precipitation_target` (mm) on
+  the sample's real lat/lon grid, ready for downstream GIS/met analysis.
+- `predictions/metrics.csv` — one row per sample (`date, lead_hours, member,
+  patch_i, patch_j, mae_mm`), plus a mean-MAE summary printed at the end.
+- `predictions/plots/*.png` — the same Cartopy pred/target/diff diagnostic
+  as training's `--plot_every`, saved every `--plot_every_n` samples (`0`,
+  the default, disables plotting so a full test set doesn't dump thousands
+  of images).
+
+`--max_samples` caps how many samples are processed, for a quick check
+before running the full dataset.
 
 ## GPU quickstart: West Africa, all 4 variants
 
