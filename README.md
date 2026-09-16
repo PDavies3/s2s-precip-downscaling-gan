@@ -157,14 +157,23 @@ only writes `variant{N}_best.pt` when validation MAE improves. Requires
 
 **`--plot_every N`** (default 20, `0` disables). Every `N` epochs, reloads
 the *current best* checkpoint (not necessarily this epoch's live weights)
-and predicts on a fixed validation sample — always the same one (val loader
-index 0, deterministic since validation isn't shuffled) so you can visually
-track how the same location/date improves across training, rather than
-comparing against a different random patch each time. Saves a 1x3
-prediction/target/difference plot (all denormalized to mm) to
-`<checkpoint_dir>/plots/`. If the best checkpoint hasn't changed since the
-last plot (validation hasn't improved in that interval), it skips instead of
-re-rendering an identical plot.
+and predicts on a fixed validation sample so you can visually track how the
+same location/date improves across training, rather than comparing against
+a different random patch each time. Saves a 1x3 prediction/target/difference
+plot (all denormalized to mm) to `<checkpoint_dir>/plots/`. If the best
+checkpoint hasn't changed since the last plot (validation hasn't improved in
+that interval), it skips instead of re-rendering an identical plot.
+
+**`--plot_region`** (default `"ghana"`) picks *which* validation sample is
+that fixed one: `_find_sample_index_for_region()` in `train.py` selects the
+first validation sample whose patch contains this named region's center
+(see `utils/regions.py`), not simply sample index 0. This matters once
+you're training on a wider multi-patch region like `west_africa` (tiled
+into multiple side-by-side patches) or `africa` — sample 0 there is
+whichever patch happens to be enumerated first (the southwestern-most tile
+of the trained region), which may not overlap Ghana at all. Defaulting to
+`"ghana"` means the diagnostic plot always shows Ghana specifically,
+regardless of which region you're actually training on.
 
 The plot is georeferenced with Cartopy (`utils/visualization.py`) — each
 panel is a `PlateCarree` map with real coastlines, country borders, and

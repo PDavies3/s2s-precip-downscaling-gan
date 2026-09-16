@@ -7,12 +7,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.utils.data.dataloader import default_collate
 from tqdm import tqdm
 
 from models import get_models
 from utils.config_loader import load_config
 from utils.folder_dataset import ConfigurableDownscalingDataset
 from utils.normalisation import denormalize
+from utils.regions import resolve_region
 from utils.visualization import plot_prediction_vs_target
 
 # Benign xarray/netCDF4 warnings fired on (almost) every file read -- silenced so they
@@ -35,6 +37,24 @@ def get_config_dataloader(config_path, batch_size, region_override=None, shuffle
                          num_workers=min(2, os.cpu_count() or 1),
                          pin_memory=torch.cuda.is_available())
     return config, dataset, loader
+
+
+def _find_sample_index_for_region(dataset, region_name):
+    """Index of the first dataset sample whose patch contains region_name's center --
+    e.g. so the training diagnostic plot always shows Ghana even when training on a
+    wider multi-patch region (west_africa/africa) where sample 0 may be a different,
+    non-overlapping patch."""
+    if dataset.patch is None:
+        return 0
+    target = resolve_region(region_name)
+    target_lat = (target["lat_min"] + target["lat_max"]) / 2
+    target_lon = (target["lon_min"] + target["lon_max"]) / 2
+    for idx, (_, _, _, patch_i, patch_j) in enumerate(dataset.samples):
+        bounds = dataset._patch_region(patch_i, patch_j)
+        if (bounds["lat_min"] <= target_lat <= bounds["lat_max"]
+                and bounds["lon_min"] <= target_lon <= bounds["lon_max"]):
+            return idx
+    return 0
 
 
 def get_dry_run_batch(batch_size, dynamic_channels, static_channels, coarse_shape, fine_shape, device):
@@ -188,6 +208,7 @@ def train(args):
     last_plotted_epoch = None
     best_path = os.path.join(args.checkpoint_dir, f"variant{args.variant}_best.pt")
     plot_dir = args.plot_dir or os.path.join(args.checkpoint_dir, "plots")
+    plot_sample_idx = _find_sample_index_for_region(val_dataset, args.plot_region) if val_loader is not None else None
 
     for epoch in range(args.epochs):
         use_adversarial = epoch >= args.warmup_epochs
@@ -251,7 +272,7 @@ def train(args):
                     plot_netG.load_state_dict(best_ckpt["generator_state_dict"])
                     plot_netG.eval()
 
-                    plot_batch = next(iter(val_loader))
+                    plot_batch = default_collate([val_dataset[plot_sample_idx]])
                     target_norm = val_dataset.target_spec["normalisation"]
                     with torch.no_grad():
                         pred = plot_netG(plot_batch["dynamic_input"].to(device),
@@ -299,6 +320,11 @@ def main():
                               "no-op without --val_config).")
     parser.add_argument("--plot_dir", type=str, default=None,
                          help="Directory for diagnostic plots (default: <checkpoint_dir>/plots)")
+    parser.add_argument("--plot_region", type=str, default="ghana",
+                         help="Named region (see utils/regions.py) whose center picks which "
+                              "validation patch the diagnostic plot uses -- matters when "
+                              "training on a wider multi-patch region (e.g. west_africa), "
+                              "where the first patch may not be this one.")
     parser.add_argument("--resume_from", type=str, default=None, help="Path to a checkpoint to resume generator weights from")
     parser.add_argument("--dry_run", action="store_true", help="Train on synthetic data -- no real config/files needed")
     parser.add_argument("--dry_run_steps", type=int, default=3)
