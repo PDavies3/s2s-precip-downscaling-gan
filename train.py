@@ -1,6 +1,7 @@
 import argparse
 import os
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,6 +10,7 @@ from torch.utils.data import DataLoader
 from models import get_models
 from utils.config_loader import load_config
 from utils.folder_dataset import ConfigurableDownscalingDataset
+from utils.normalisation import denormalize
 
 CRITERION_GAN = nn.BCEWithLogitsLoss()
 CRITERION_PIXEL = nn.L1Loss()
@@ -83,19 +85,23 @@ def generator_step(netG, netD, optimizer_G, variant, dynamics, statics, real_rai
 
 
 @torch.no_grad()
-def validate(netG, val_loader, device):
+def validate(netG, val_loader, device, target_norm_config):
     netG.eval()
-    total_pixel = 0.0
+    total_mae_mm = 0.0
     n_batches = 0
     for batch in val_loader:
         dynamics = batch["dynamic_input"].to(device, non_blocking=True)
         statics = batch["static_input"].to(device, non_blocking=True)
         real_rain = batch["target"].to(device, non_blocking=True)
         fake_rain = netG(dynamics, statics)
-        total_pixel += CRITERION_PIXEL(fake_rain, real_rain).item()
+        # Compare in physical mm, not normalized (z-scored log1p) space -- that's the
+        # unit checkpoint selection should be judged in, not an arbitrary z-score scale.
+        real_mm = denormalize(real_rain.cpu().numpy(), target_norm_config)
+        fake_mm = denormalize(fake_rain.cpu().numpy(), target_norm_config)
+        total_mae_mm += np.abs(fake_mm - real_mm).mean()
         n_batches += 1
     netG.train()
-    return {"pixel": total_pixel / max(n_batches, 1)}
+    return {"mae_mm": float(total_mae_mm / max(n_batches, 1))}
 
 
 def _save_checkpoint(path, netG, netD, variant, epoch, extra=None):
@@ -211,17 +217,17 @@ def train(args):
               f"Loss_G_pixel: {sum_loss_G_pixel/n:.4f}")
 
         if val_loader is not None:
-            val_metrics = validate(netG, val_loader, device)
-            print(f"           Val_pixel: {val_metrics['pixel']:.4f}")
+            val_metrics = validate(netG, val_loader, device, val_dataset.target_spec["normalisation"])
+            print(f"           Val_MAE_mm: {val_metrics['mae_mm']:.4f}")
 
-            if val_metrics["pixel"] < best_score:
-                best_score = val_metrics["pixel"]
+            if val_metrics["mae_mm"] < best_score:
+                best_score = val_metrics["mae_mm"]
                 best_path = os.path.join(args.checkpoint_dir, f"variant{args.variant}_best.pt")
                 _save_checkpoint(best_path, netG, netD, args.variant, epoch + 1,
-                                  extra={"val_pixel_loss": val_metrics["pixel"]})
-                print(f"           >> New best (val_pixel={best_score:.4f}). Saved to {best_path}")
+                                  extra={"val_mae_mm": val_metrics["mae_mm"]})
+                print(f"           >> New best (val_mae_mm={best_score:.4f}). Saved to {best_path}")
 
-        if (epoch + 1) % args.checkpoint_every == 0 or epoch == args.epochs - 1:
+        if not args.save_best_only and ((epoch + 1) % args.checkpoint_every == 0 or epoch == args.epochs - 1):
             ckpt_path = os.path.join(args.checkpoint_dir, f"variant{args.variant}_epoch{epoch+1}.pt")
             _save_checkpoint(ckpt_path, netG, netD, args.variant, epoch + 1)
             print(f">> Checkpoint saved to {ckpt_path}")
@@ -241,6 +247,9 @@ def main():
                          help="Epochs of pixel loss only before the discriminator/adversarial term is introduced.")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints")
     parser.add_argument("--checkpoint_every", type=int, default=5)
+    parser.add_argument("--save_best_only", action="store_true",
+                         help="Skip periodic --checkpoint_every snapshots; only save "
+                              "variant{N}_best.pt when validation improves (requires --val_config).")
     parser.add_argument("--resume_from", type=str, default=None, help="Path to a checkpoint to resume generator weights from")
     parser.add_argument("--dry_run", action="store_true", help="Train on synthetic data -- no real config/files needed")
     parser.add_argument("--dry_run_steps", type=int, default=3)
@@ -248,6 +257,9 @@ def main():
 
     if not args.dry_run and args.config is None:
         parser.error("--config is required unless --dry_run is set")
+
+    if args.save_best_only and args.val_config is None:
+        parser.error("--save_best_only requires --val_config (otherwise no checkpoint would ever be saved)")
 
     train(args)
 
