@@ -214,7 +214,18 @@ uv run train.py --dry_run --variant 4 --batch_size 4 --epochs 1
 # Real training, with validation + checkpointing
 uv run train.py --config configs/ghana_train.yaml --val_config configs/ghana_val.yaml \
     --variant 4 --batch_size 4 --epochs 50 --warmup_epochs 5
+
+# Recommended: best-only checkpointing + a diagnostic plot on every new best
+uv run train.py --config configs/west_africa_train.yaml --val_config configs/west_africa_val.yaml \
+    --variant 1 --batch_size 16 --epochs 50 --warmup_epochs 10 \
+    --save_best_only --plot_every 1
 ```
+
+`--save_best_only` drops the periodic `--checkpoint_every` snapshots and
+keeps only `variant{N}_best.pt`. `--plot_every 1` checks every epoch, but
+(per "Model design notes" above) only actually renders a plot when the best
+checkpoint changed since the last one — so in practice it fires exactly on
+the epochs where validation improved, not on every single epoch.
 
 ## Run inference
 
