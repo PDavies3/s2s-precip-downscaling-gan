@@ -184,14 +184,6 @@ class ConfigurableDownscalingDataset(Dataset):
                 (self.region["lat_max"] - self.region["lat_min"]) // self._patch_extent_lat_deg))
             self._n_lon_patches = max(1, int(
                 (self.region["lon_max"] - self.region["lon_min"]) // self._patch_extent_lon_deg))
-            print(f"[ConfigurableDownscalingDataset] Patch tiling: region is "
-                  f"{self.region['lat_max']-self.region['lat_min']:.2f} x "
-                  f"{self.region['lon_max']-self.region['lon_min']:.2f} deg, "
-                  f"one patch is {self._patch_extent_lat_deg:.2f} x "
-                  f"{self._patch_extent_lon_deg:.2f} deg (coarse_resolution_deg="
-                  f"{self.coarse_resolution_deg}) -> "
-                  f"{self._n_lat_patches} x {self._n_lon_patches} = "
-                  f"{self._n_lat_patches * self._n_lon_patches} patches per date/lead/member.")
 
         self.start_date = config.get("start_date")
         self.end_date = config.get("end_date")

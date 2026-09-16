@@ -125,7 +125,6 @@ def _save_checkpoint(path, netG, netD, variant, epoch, extra=None):
 
 def train(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f">> Orchestrating Model Variant Strategy {args.variant} execution pipeline on target accelerator: {device}")
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
     if args.dry_run:
@@ -160,7 +159,6 @@ def train(args):
         print(f">> Dry run complete. Checkpoint saved to {ckpt_path}")
         return
 
-    print(f">> Using config-driven dataset: {args.config}")
     _, _, train_loader = get_config_dataloader(args.config, args.batch_size, region_override=args.region)
 
     probe_batch = next(iter(train_loader))
@@ -169,7 +167,6 @@ def train(args):
 
     val_loader = None
     if args.val_config:
-        print(f">> Using validation config: {args.val_config}")
         _, val_dataset, val_loader = get_config_dataloader(
             args.val_config, args.batch_size, region_override=args.region, shuffle=False
         )
