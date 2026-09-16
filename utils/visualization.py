@@ -18,9 +18,9 @@ def plot_prediction_vs_target(pred_mm, target_mm, lat, lon, save_path, title=Non
     proj = ccrs.PlateCarree()
 
     panels = [
-        (pred_mm, "Prediction (mm)", "Blues", 0.0, vmax),
-        (target_mm, "Target (mm)", "Blues", 0.0, vmax),
-        (diff_mm, "Prediction - Target (mm)", "RdBu_r", -diff_max, diff_max),
+        (pred_mm, "Predicted", "Blues", 0.0, vmax),
+        (target_mm, "Target", "Blues", 0.0, vmax),
+        (diff_mm, "Bias (Predicted − Target)", "RdBu_r", -diff_max, diff_max),
     ]
 
     fig, axes = plt.subplots(1, 3, figsize=(16, 5), subplot_kw={"projection": proj})
@@ -33,8 +33,13 @@ def plot_prediction_vs_target(pred_mm, target_mm, lat, lon, save_path, title=Non
         gl = ax.gridlines(draw_labels=True, linewidth=0.3, alpha=0.5)
         gl.top_labels = False
         gl.right_labels = False
-        ax.set_title(panel_title)
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        # ax.set_title() silently fails to render on a cartopy GeoAxes once
+        # gridlines(draw_labels=True) is active (no error -- the text is just
+        # missing from the saved figure). ax.text() in axes coordinates sidesteps it.
+        ax.text(0.5, 1.06, panel_title, transform=ax.transAxes, ha="center", va="bottom",
+                fontsize=13, fontweight="bold")
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label("mm")
 
     if title:
         fig.suptitle(title)
