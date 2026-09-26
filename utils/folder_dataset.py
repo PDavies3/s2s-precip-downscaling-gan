@@ -85,18 +85,26 @@ def _patch_bounds(region, patch_extent_lat_deg, patch_extent_lon_deg, patch_i, p
     }
 
 
-def _standardize_dims(da):
+def _standardize_dims(da, daily_agg="mean"):
     """
     Real source files are NOT consistent about dimension naming, a leftover
     singleton time axis, or even being daily-aggregated at all -- e.g. in one
     real ERA5/IMERG archive, ERA5 files use ('latitude', 'longitude') while
     IMERG files use ('time', 'lon', 'lat') with time of length 1 (one file =
     one date); some raw ERA5 exports also turn up per-date but still hourly,
-    with a 24-length 'valid_time' axis (matching scripts/build_daily_cache.py's
-    own daily-mean convention -- see its docstring) and a leftover singleton
+    with a 24-length 'valid_time' axis and a leftover singleton
     'pressure_level'/'number' axis for single-level pulls. Normalize all of
     these so _crop_region/_resample_to_shape (which always key off
     'latitude'/'longitude') work regardless of the source convention.
+
+    daily_agg picks how that raw 'valid_time' axis collapses to one daily
+    value: 'mean' for instantaneous state variables (cape, msl, tcw, u, v, w
+    -- matches scripts/build_daily_cache.py's own convention, see its
+    docstring), 'sum' for accumulated flux variables (ERA5 tp is an
+    hourly-accumulated depth, not an instantaneous rate -- averaging it
+    silently undercounts the true daily total by ~24x; verified against a
+    known-good pre-aggregated tp file, where sum-over-24h matched exactly
+    and mean-over-24h did not).
     """
     rename = {}
     if "lat" in da.dims and "latitude" not in da.dims:
@@ -114,7 +122,7 @@ def _standardize_dims(da):
             )
         da = da.isel(time=0)
     if "valid_time" in da.dims:
-        da = da.mean(dim="valid_time")
+        da = da.sum(dim="valid_time") if daily_agg == "sum" else da.mean(dim="valid_time")
     extra_dims = [d for d in da.dims if d not in ("latitude", "longitude")]
     if extra_dims:
         da = da.squeeze(extra_dims, drop=True)
@@ -269,10 +277,10 @@ class ConfigurableDownscalingDataset(Dataset):
         return _patch_bounds(self.region, self._patch_extent_lat_deg,
                               self._patch_extent_lon_deg, patch_i, patch_j)
 
-    def _load_cropped(self, path, region, resolution_deg=None, shape=None):
+    def _load_cropped(self, path, region, resolution_deg=None, shape=None, daily_agg="mean"):
         ds = xr.open_dataset(path)
         var_name = list(ds.data_vars)[0]
-        da_full = _standardize_dims(ds[var_name])
+        da_full = _standardize_dims(ds[var_name], daily_agg=daily_agg)
         if shape is not None:
             return _resample_to_shape(da_full, region, shape)
         if resolution_deg is not None:
@@ -292,7 +300,8 @@ class ConfigurableDownscalingDataset(Dataset):
             for level in levels:
                 path = self._resolve_path(spec["name"], date_str, lead_hours, member, level)
                 shape = self.coarse_shape if self.patch is not None else None
-                da = self._load_cropped(path, region, spec.get("resolution_deg"), shape)
+                da = self._load_cropped(path, region, spec.get("resolution_deg"), shape,
+                                         daily_agg=spec.get("daily_aggregation", "mean"))
                 arr = da.values
                 scale = spec.get("scale")
                 if scale is not None:

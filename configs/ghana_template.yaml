@@ -71,6 +71,10 @@ inputs:
   - name: tp
     path: ERA5/era5_tp
     scale: 1000  # ERA5 tp is in metres -- convert to mm to match IMERG's units
+    daily_aggregation: sum  # tp is hourly-ACCUMULATED, not instantaneous -- averaging
+    # 24 hourly values undercounts the true daily total by ~24x. Only matters for a
+    # raw-hourly (not-yet-daily-aggregated) source file with a 'valid_time' axis; a
+    # no-op for already-daily files. See utils/folder_dataset.py::_standardize_dims.
     normalisation:
       type: log1p
       stats: {log1p_mean: 0.859933, log1p_std: 0.919867}
