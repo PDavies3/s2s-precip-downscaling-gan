@@ -13,6 +13,7 @@ from tqdm import tqdm
 from models import get_models
 from utils.config_loader import load_config
 from utils.folder_dataset import ConfigurableDownscalingDataset
+from utils.losses import LOSS_REGISTRY, build_extra_losses
 from utils.normalisation import denormalize
 from utils.regions import resolve_region
 from utils.visualization import plot_prediction_vs_target
@@ -91,7 +92,8 @@ def discriminator_step(netD, netG, optimizer_D, variant, dynamics, statics, real
     return loss_D.item()
 
 
-def generator_step(netG, netD, optimizer_G, variant, dynamics, statics, real_rain, pixel_weight, use_adversarial):
+def generator_step(netG, netD, optimizer_G, variant, dynamics, statics, real_rain, pixel_weight, use_adversarial,
+                    extra_losses=None):
     optimizer_G.zero_grad()
     fake_rain = netG(dynamics, statics)
     loss_G_pixel = CRITERION_PIXEL(fake_rain, real_rain)
@@ -108,9 +110,16 @@ def generator_step(netG, netD, optimizer_G, variant, dynamics, statics, real_rai
         loss_G_adv = torch.tensor(0.0, device=fake_rain.device)
 
     loss_G = loss_G_adv + (pixel_weight * loss_G_pixel)
+    extra_values = {}
+    for name, weight, fn in (extra_losses or []):
+        value = fn(fake_rain, real_rain)
+        loss_G = loss_G + weight * value
+        extra_values[name] = value.item()
+
     loss_G.backward()
     optimizer_G.step()
-    return loss_G.item(), loss_G_adv.item(), loss_G_pixel.item()
+    return {"loss_G": loss_G.item(), "loss_G_adv": loss_G_adv.item(), "loss_G_pixel": loss_G_pixel.item(),
+            **extra_values}
 
 
 @torch.no_grad()
@@ -155,6 +164,7 @@ def train(args):
         netG, netD = get_models(args.variant, dynamic_channels, static_channels, device)
         optimizer_G = torch.optim.Adam(netG.parameters(), lr=args.lr, betas=(0.5, 0.999))
         optimizer_D = torch.optim.Adam(netD.parameters(), lr=args.lr, betas=(0.5, 0.999))
+        extra_losses = build_extra_losses(args.losses, args)
 
         for epoch in range(args.epochs):
             use_adversarial = epoch >= args.warmup_epochs
@@ -166,13 +176,16 @@ def train(args):
                     loss_D = discriminator_step(netD, netG, optimizer_D, args.variant, dynamics, statics, real_rain)
                 else:
                     loss_D = 0.0
-                loss_G, loss_G_adv, loss_G_pixel = generator_step(
+                losses = generator_step(
                     netG, netD, optimizer_G, args.variant, dynamics, statics, real_rain,
-                    args.pixel_weight, use_adversarial,
+                    args.pixel_weight, use_adversarial, extra_losses=extra_losses,
                 )
             tag = "(warmup, no adversarial) " if not use_adversarial else ""
+            extra_str = "".join(f" | Loss_{k}: {v:.4f}" for k, v in losses.items()
+                                 if k not in ("loss_G", "loss_G_adv", "loss_G_pixel"))
             print(f"Epoch [{epoch+1}/{args.epochs}] (dry run) {tag}"
-                  f"Loss_D: {loss_D:.4f} | Loss_G_adv: {loss_G_adv:.4f} | Loss_G_pixel: {loss_G_pixel:.4f}")
+                  f"Loss_D: {loss_D:.4f} | Loss_G_adv: {losses['loss_G_adv']:.4f} | "
+                  f"Loss_G_pixel: {losses['loss_G_pixel']:.4f}{extra_str}")
 
         ckpt_path = os.path.join(args.checkpoint_dir, f"variant{args.variant}_dryrun.pt")
         _save_checkpoint(ckpt_path, netG, netD, args.variant, args.epochs)
@@ -209,6 +222,7 @@ def train(args):
     best_path = os.path.join(args.checkpoint_dir, f"variant{args.variant}_best.pt")
     plot_dir = args.plot_dir or os.path.join(args.checkpoint_dir, "plots")
     plot_sample_idx = _find_sample_index_for_region(val_dataset, args.plot_region) if val_loader is not None else None
+    extra_losses = build_extra_losses(args.losses, args)
 
     for epoch in range(args.epochs):
         use_adversarial = epoch >= args.warmup_epochs
@@ -216,6 +230,7 @@ def train(args):
         netD.train()
 
         sum_loss_D = sum_loss_G = sum_loss_G_adv = sum_loss_G_pixel = 0.0
+        sum_extra = {name: 0.0 for name, _, _ in extra_losses}
         n_batches = 0
 
         epoch_tag = "(warmup)" if not use_adversarial else ""
@@ -230,24 +245,29 @@ def train(args):
             else:
                 loss_D = 0.0
 
-            loss_G, loss_G_adv, loss_G_pixel = generator_step(
+            losses = generator_step(
                 netG, netD, optimizer_G, args.variant, dynamics, statics, real_rain,
-                args.pixel_weight, use_adversarial,
+                args.pixel_weight, use_adversarial, extra_losses=extra_losses,
             )
 
             sum_loss_D += loss_D
-            sum_loss_G += loss_G
-            sum_loss_G_adv += loss_G_adv
-            sum_loss_G_pixel += loss_G_pixel
+            sum_loss_G += losses["loss_G"]
+            sum_loss_G_adv += losses["loss_G_adv"]
+            sum_loss_G_pixel += losses["loss_G_pixel"]
+            for name in sum_extra:
+                sum_extra[name] += losses[name]
             n_batches += 1
-            progress.set_postfix(D=f"{sum_loss_D/n_batches:.4f}", G_adv=f"{sum_loss_G_adv/n_batches:.4f}",
-                                  G_pix=f"{sum_loss_G_pixel/n_batches:.4f}")
+            postfix = {"D": f"{sum_loss_D/n_batches:.4f}", "G_adv": f"{sum_loss_G_adv/n_batches:.4f}",
+                       "G_pix": f"{sum_loss_G_pixel/n_batches:.4f}"}
+            postfix.update({name: f"{total/n_batches:.4f}" for name, total in sum_extra.items()})
+            progress.set_postfix(**postfix)
 
         n = max(n_batches, 1)
         tag = "(warmup, no adversarial) " if not use_adversarial else ""
+        extra_str = "".join(f" | Loss_{name}: {total/n:.4f}" for name, total in sum_extra.items())
         print(f"Epoch [{epoch+1}/{args.epochs}] {tag}"
               f"Loss_D: {sum_loss_D/n:.4f} | Loss_G_adv: {sum_loss_G_adv/n:.4f} | "
-              f"Loss_G_pixel: {sum_loss_G_pixel/n:.4f}")
+              f"Loss_G_pixel: {sum_loss_G_pixel/n:.4f}{extra_str}")
 
         if val_loader is not None:
             val_metrics = validate(netG, val_loader, device, val_dataset.target_spec["normalisation"])
@@ -309,6 +329,27 @@ def main():
     parser.add_argument("--pixel_weight", type=float, default=10.0, help="L1 pixel-loss weight in the generator loss")
     parser.add_argument("--warmup_epochs", type=int, default=5,
                          help="Epochs of pixel loss only before the discriminator/adversarial term is introduced.")
+    parser.add_argument("--losses", type=str, nargs="+", default=[], choices=list(LOSS_REGISTRY),
+                         help="Extra generator loss terms to add on top of the base pixel (L1) + adversarial "
+                              f"loss. Repeatable, e.g. --losses rain_weighted gradient. Available: {list(LOSS_REGISTRY)} "
+                              "(see utils/losses.py for what each one does).")
+    parser.add_argument("--rain_weight_loss_weight", type=float, default=1.0,
+                         help="Weight for the 'rain_weighted' loss term (only used if it's in --losses)")
+    parser.add_argument("--rain_weight_factor", type=float, default=5.0,
+                         help="Extra multiplier applied to pixels above --rain_weight_threshold, "
+                              "for the 'rain_weighted' loss term")
+    parser.add_argument("--rain_weight_threshold", type=float, default=0.0,
+                         help="Normalized-space threshold above which a pixel counts as 'rain' "
+                              "for the 'rain_weighted' loss term (target values live in z-scored "
+                              "log1p space, not raw mm -- 0.0 means 'above the training-set average', "
+                              "not 'any nonzero rain'; tune to your target's normalisation stats if you "
+                              "want a different cutoff)")
+    parser.add_argument("--gradient_loss_weight", type=float, default=1.0,
+                         help="Weight for the 'gradient' (spatial-structure) loss term (only used if it's in --losses)")
+    parser.add_argument("--ssim_loss_weight", type=float, default=1.0,
+                         help="Weight for the 'ssim' (1-SSIM structural) loss term (only used if it's in --losses)")
+    parser.add_argument("--ssim_c1", type=float, default=0.01 ** 2, help="SSIM stabilizing constant C1")
+    parser.add_argument("--ssim_c2", type=float, default=0.03 ** 2, help="SSIM stabilizing constant C2")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints")
     parser.add_argument("--checkpoint_every", type=int, default=5)
     parser.add_argument("--save_best_only", action="store_true",

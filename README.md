@@ -131,6 +131,26 @@ Do not reintroduce the old `_v1`/`_v2`/`_v3`/`_v4`-suffixed files into this fold
 
 ## Model design notes
 
+**Selectable extra loss terms (`--losses`).** By default the generator loss is
+just pixel (L1) + adversarial, matching classic SRGAN/pix2pix. Plain L1 on
+sparse, skewed precipitation tends to reward a blurry, conservative
+prediction that stays close to the (dominant) dry background rather than
+committing to where it actually rains. `utils/losses.py` adds three optional
+terms you can layer on with `--losses <name> [<name> ...]`:
+- `rain_weighted` — L1 with extra weight on pixels above `--rain_weight_threshold`
+  (normalized-space, not raw mm — see the flag's help text), so missing the
+  rainy pixels costs more than plain L1 lets it.
+- `gradient` — L1 on finite-difference spatial gradients, rewarding correct
+  edges/structure that per-pixel L1 doesn't penalize on its own.
+- `ssim` — `1 - SSIM` (windowed via average pooling), rewarding local
+  contrast/structure. Its stabilizing constants (`--ssim_c1`/`--ssim_c2`) are
+  calibrated for a roughly [0, 1] or [0, 255] range and may need retuning for
+  this project's z-scored normalized values.
+
+Each has its own `--*_loss_weight` (and `rain_weighted` also has
+`--rain_weight_factor`/`--rain_weight_threshold`). All are additive on top of
+the base pixel+adversarial loss, never a replacement for it.
+
 **No output activation on any generator.** The target fed to the pixel loss
 is the `log1p` normalization from `target:` in `configs/ghana_template.yaml`
 — which, despite the name, is a *z-scored* log1p value
