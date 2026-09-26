@@ -1,0 +1,7 @@
+# First-pass sanity check on the unseen archive before running the full
+# 2022-2025 span (west_africa_unseen.yaml) -- just 2022, for a faster
+# (~1h vs ~4h) initial evaluation.
+extends: west_africa_template.yaml
+data_root: "/media/pdavies/T7 Shield/Processed_data"
+start_date: '2022-01-01'
+end_date: '2022-12-31'
