@@ -87,12 +87,16 @@ def _patch_bounds(region, patch_extent_lat_deg, patch_extent_lon_deg, patch_i, p
 
 def _standardize_dims(da):
     """
-    Real source files are NOT consistent about dimension naming or a
-    leftover singleton time axis -- e.g. in one real ERA5/IMERG archive,
-    ERA5 files use ('latitude', 'longitude') while IMERG files use
-    ('time', 'lon', 'lat') with time of length 1 (one file = one date).
-    Normalize both quirks so _crop_region/_resample_to_shape (which always
-    key off 'latitude'/'longitude') work regardless of the source convention.
+    Real source files are NOT consistent about dimension naming, a leftover
+    singleton time axis, or even being daily-aggregated at all -- e.g. in one
+    real ERA5/IMERG archive, ERA5 files use ('latitude', 'longitude') while
+    IMERG files use ('time', 'lon', 'lat') with time of length 1 (one file =
+    one date); some raw ERA5 exports also turn up per-date but still hourly,
+    with a 24-length 'valid_time' axis (matching scripts/build_daily_cache.py's
+    own daily-mean convention -- see its docstring) and a leftover singleton
+    'pressure_level'/'number' axis for single-level pulls. Normalize all of
+    these so _crop_region/_resample_to_shape (which always key off
+    'latitude'/'longitude') work regardless of the source convention.
     """
     rename = {}
     if "lat" in da.dims and "latitude" not in da.dims:
@@ -109,6 +113,11 @@ def _standardize_dims(da):
                 f"has {da.sizes['time']}."
             )
         da = da.isel(time=0)
+    if "valid_time" in da.dims:
+        da = da.mean(dim="valid_time")
+    extra_dims = [d for d in da.dims if d not in ("latitude", "longitude")]
+    if extra_dims:
+        da = da.squeeze(extra_dims, drop=True)
     return da
 
 

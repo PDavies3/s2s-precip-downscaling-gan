@@ -31,16 +31,16 @@ import numpy as np
 import xarray as xr
 
 SOURCE_ROOT = "/media/pdavies/T7 Shield/era5_data"
-DEST_ROOT = os.path.expanduser("~/era5_daily_cache/ERA5")
+DEFAULT_DEST_ROOT = os.path.expanduser("~/era5_daily_cache/ERA5")
 
 
-def convert(var_name, years, level=None):
+def convert(var_name, years, level=None, dest_root=DEFAULT_DEST_ROOT):
     if level is None:
         source_dir = os.path.join(SOURCE_ROOT, var_name)
-        dest_dir = os.path.join(DEST_ROOT, f"era5_{var_name}")
+        dest_dir = os.path.join(dest_root, f"era5_{var_name}")
     else:
         source_dir = os.path.join(SOURCE_ROOT, var_name, str(level))
-        dest_dir = os.path.join(DEST_ROOT, f"era5_{var_name}_{level}")
+        dest_dir = os.path.join(dest_root, f"era5_{var_name}_{level}")
     os.makedirs(dest_dir, exist_ok=True)
 
     for year in years:
@@ -102,8 +102,11 @@ def main():
     parser.add_argument("--level", type=int, default=None,
                          help="Pressure level subfolder, e.g. 850 (only for multi-level vars like w)")
     parser.add_argument("--years", type=int, nargs="+", required=True)
+    parser.add_argument("--dest_root", type=str, default=DEFAULT_DEST_ROOT,
+                         help="Destination <root>/ERA5/era5_<var>[_<level>]/ directory "
+                              f"(default: {DEFAULT_DEST_ROOT})")
     args = parser.parse_args()
-    convert(args.var, args.years, level=args.level)
+    convert(args.var, args.years, level=args.level, dest_root=args.dest_root)
 
 
 if __name__ == "__main__":

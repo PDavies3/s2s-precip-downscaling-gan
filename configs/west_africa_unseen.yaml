@@ -1,0 +1,9 @@
+# Held-out evaluation config: dates strictly after west_africa_train.yaml/
+# west_africa_val.yaml's combined range (2019-01-01 through 2021-12-31), so this
+# is genuinely unseen data, not just a different split of the same period.
+# data_root points at the newly rebuilt archive (era5_w_200/700/850 daily-cache
+# extended through 2025 via scripts/build_daily_cache.py --dest_root).
+extends: west_africa_template.yaml
+data_root: "/media/pdavies/T7 Shield/Processed_data"
+start_date: '2022-01-01'
+end_date: '2025-12-31'

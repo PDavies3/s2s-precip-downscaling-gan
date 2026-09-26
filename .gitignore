@@ -34,6 +34,7 @@ checkpoints/
 outputs/
 results/
 figures/
+predictions/
 *.pt
 *.pth
 *.ckpt
